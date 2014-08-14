@@ -838,6 +838,7 @@ function ensureRemoteFilesystemContents(layout, jar, callback) {
       }
 
       expect(actualContents).to.deep.equal(expectedContents);
+
       callback(err);
     });
   }
