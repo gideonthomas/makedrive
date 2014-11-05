@@ -201,6 +201,8 @@ SyncProtocolHandler.prototype.handleResponse = function(message) {
     this.handleDiffResponse(message);
   } else if(message.is.patch && client.is.downstreaming) {
     this.handlePatchResponse(message);
+  } else if(message.is.root && client.is.downstreaming) {
+    this.handleRootResponse(message);
   } else {
     log.warn({syncMessage: message, client: client}, 'Unable to handle response at this time.');
     client.sendMessage(SyncProtocolHandler.error.response);
@@ -653,4 +655,15 @@ SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
 
     client.sendMessage(response);
   });
+};
+
+SyncProtocolHandler.prototype.handleRootResponse = function(message) {
+  var client = ensureClient(this.client);
+  if(!client) {
+    return;
+  }
+
+  client.state = States.LISTENING;
+  delete client._syncStarted;
+  log.info({client: client}, 'Ignored downstream sync due to path to sync being out of client\'s root');
 };

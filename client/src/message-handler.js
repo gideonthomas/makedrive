@@ -34,6 +34,15 @@ function handleRequest(syncManager, data) {
   var session = syncManager.session;
 
   function handleChecksumRequest() {
+    var message;
+
+    // If the server requests to downstream a path that is not in the
+    // root, ignore the downstream.
+    if(data.content.path.indexOf(fs.root) !== 0) {
+      message = SyncMessage.response.root;
+      return syncManager.send(message.stringify());
+    }
+
     var srcList = session.srcList = data.content.srcList;
     session.path = data.content.path;
     fs.modifiedPath = null;
@@ -46,7 +55,7 @@ function handleRequest(syncManager, data) {
 
       session.step = steps.PATCH;
 
-      var message = SyncMessage.request.diffs;
+      message = SyncMessage.request.diffs;
       message.content = {checksums: checksums};
       syncManager.send(message.stringify());
     });

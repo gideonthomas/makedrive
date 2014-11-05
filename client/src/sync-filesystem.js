@@ -15,16 +15,13 @@ function SyncFileSystem(fs) {
   var self = this;
   var pathToSync;
   var modifiedPath;
+  var root = '/';
 
   // Manage path resolution for sync path
   Object.defineProperty(self, 'pathToSync', {
     get: function() { return pathToSync; },
     set: function(path) {
-      if(path) {
-        pathToSync = resolvePath(pathToSync, path);
-      } else {
-        pathToSync = null;
-      }
+      pathToSync = path ? resolvePath(pathToSync, path) : null;
     }
   });
 
@@ -32,12 +29,14 @@ function SyncFileSystem(fs) {
   Object.defineProperty(fs, 'modifiedPath', {
     get: function() { return modifiedPath; },
     set: function(path) {
-      if(path) {
-        modifiedPath = resolvePath(modifiedPath, path);
-      } else {
-        modifiedPath = null;
-      }
+      modifiedPath = path ? resolvePath(modifiedPath, path) : null;
     }
+  });
+
+  // Expose the sync root for the filesystem but do not allow
+  // direct modifications to it
+  Object.defineProperty(self, 'root', {
+    get: function() { return root; }
   });
 
   // The following non-modifying fs operations can be run as normal,
@@ -87,14 +86,20 @@ function SyncFileSystem(fs) {
         // In most cases we want to use the path itself, but in the case
         // that a node is being removed, we want the parent dir.
         pathOrFD = useParentPath ? Path.dirname(pathOrFD) : pathOrFD;
-
         conflicted = !!conflicted;
 
-        // Record base sync path if this is a regular, non-conflicted path.
-        if(!conflicted && !fs.openFiles[pathOrFD]) {
-          // Check to see if it is a path or an open file descriptor
-          // TODO: Deal with a case of fs.open for a path with a write flag
-          // https://github.com/mozilla/makedrive/issues/210.
+        // If we try to remove or rename the sync root, change the root
+        // to the parent of the current sync root.
+        if(useParentPath && pathOrFD === root) {
+          root = Path.dirname(pathOrFD);
+        }
+
+        // Check to see if it is a non-conflicted path or an open file descriptor
+        // and only record the path if it is contained in the specified
+        // syncing root of the filesystem.
+        // TODO: Deal with a case of fs.open for a path with a write flag
+        // https://github.com/mozilla/makedrive/issues/210.
+        if(!conflicted && !fs.openFiles[pathOrFD] && pathOrFD.indexOf(root) === 0) {
           self.pathToSync = pathOrFD;
           // Record the path that was modified on the fs
           fs.modifiedPath = pathOrFD;
@@ -187,6 +192,48 @@ function SyncFileSystem(fs) {
   };
   self.fgetUnsynced = function(fd, callback) {
     fsUtils.fgetUnsynced(fs, fd, callback);
+  };
+
+  // Expose a setter for the sync root
+  self.setRoot = function(path, callback) {
+    if(!path) {
+      root = '/';
+      self.pathToSync = root;
+      fs.modifiedPath = null;
+
+      return callback();
+    }
+
+    fs.lstat(path, function(err, stats) {
+      if(!err) {
+        if(!stats.isDirectory()) {
+          return callback(new Filer.Errors.ENOTDIR(path + ' is not a directory'));
+        }
+
+        root = path;
+        self.pathToSync = root;
+        fs.modifiedPath = null;
+
+        return;
+      }
+
+      // Fatal error
+      if(err.code !== 'ENOENT') {
+        return callback(err);
+      }
+
+      fs.mkdir(path, function(err) {
+        if(err) {
+          return callback(err);
+        }
+
+        root = path;
+        self.pathToSync = root;
+        fs.modifiedPath = null;
+
+        callback();
+      });
+    });
   };
 }
 
