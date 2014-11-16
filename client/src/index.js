@@ -63,8 +63,8 @@
  *
  * - disconnect(): disconnect from the sync server.
  *
- * - request(path): request a sync with the server for the specified
- * path. Such requests may or may not be processed right away.
+ * - request(): request a sync with the server .
+ * Such requests may or may not be processed right away.
  *
  *
  * Finally, the `sync` propery also exposes a `state`, which is the
@@ -248,7 +248,7 @@ function createFS(options) {
       // Try to connect to provided server URL. Use the raw Filer fs
       // instance for all rsync operations on the filesystem, so that we
       // can untangle changes done by user vs. sync code.
-      manager = new SyncManager(sync, _fs);
+      manager = new SyncManager(sync, fs, _fs);
       manager.init(url, token, options, function(err) {
         if(err) {
           log.error('Error connecting to ' + url, err);
