@@ -6,38 +6,167 @@
 
 var Filer = require('../../lib/filer.js');
 var Shell = require('../../lib/filer-shell.js');
-var Path = Filer.Path;
 var fsUtils = require('../../lib/fs-utils.js');
 var conflict = require('../../lib/conflict.js');
-var resolvePath = require('../../lib/sync-path-resolver.js').resolve;
+var syncModes = require('../../lib/constants.js').syncModes;
 
 function SyncFileSystem(fs) {
   var self = this;
-  var pathToSync;
-  var modifiedPath;
   var root = '/';
 
-  // Manage path resolution for sync path
-  Object.defineProperty(self, 'pathToSync', {
-    get: function() { return pathToSync; },
-    set: function(path) {
-      pathToSync = path ? resolvePath(pathToSync, path) : null;
+  // Expose the root used to sync for the filesystem
+  // Defaults to '/'
+  Object.defineProperties(self, {
+    'root': {
+      get: function() { return root; }
     }
   });
 
-  // Record modifications to the filesystem during a sync
-  Object.defineProperty(fs, 'modifiedPath', {
-    get: function() { return modifiedPath; },
-    set: function(path) {
-      modifiedPath = path ? resolvePath(modifiedPath, path) : null;
-    }
-  });
+  // Get the paths queued up to sync
+  self.getPathsToSync = function(callback) {
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
 
-  // Expose the sync root for the filesystem but do not allow
-  // direct modifications to it
-  Object.defineProperty(self, 'root', {
-    get: function() { return root; }
-  });
+      callback(null, pathsToSync && pathsToSync.toSync);
+    });
+  };
+
+  // Get the path that was modified during a sync
+  self.getModifiedPath = function(callback) {
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
+
+      callback(null, pathsToSync && pathsToSync.modified);
+    });
+  };
+
+  // Indicate that the path on top of the queue has
+  // begun syncing
+  self.setSyncing = function(callback) {
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
+
+      if(!pathsToSync || !pathsToSync.toSync || !pathsToSync.toSync[0]) {
+        return callback();
+      }
+
+      pathsToSync.toSync[0].syncing = true;
+
+      callback();
+    });
+  };
+
+  // Delay the sync of the currently syncing path
+  // by moving it to the end of the sync queue
+  self.delaySync = function(callback) {
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
+
+      if(!pathsToSync || !pathsToSync.toSync || !pathsToSync.toSync[0]) {
+        return callback();
+      }
+
+      var delayedPath = pathsToSync.toSync.shift();
+      pathsToSync.toSync.push(delayedPath);
+      delete pathsToSync.modified;
+
+      fsUtils.setPathsToSync(fs, root, pathsToSync, function(err) {
+        if(err) {
+          return callback(err);
+        }
+
+        callback(null, delayedPath);
+      });
+    });
+  };
+
+  // Remove the path that was just synced
+  self.dequeueSync = function(callback) {
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
+
+      if(!pathsToSync || !pathsToSync.toSync || !pathsToSync.toSync[0]) {
+        return callback();
+      }
+
+      var removedPath = pathsToSync.toSync.shift();
+      if(!pathsToSync.toSync.length) {
+        delete pathsToSync.toSync;
+      }
+      delete pathsToSync.modified;
+
+      fsUtils.setPathsToSync(fs, root, pathsToSync, function(err) {
+        if(err) {
+          return callback(err);
+        }
+
+        callback(null, removedPath);
+      });
+    });
+  };
+
+  // Set the sync root for the filesystem.
+  // The path provided must name an existing directory
+  // or the setter will fail.
+  // Once the new root is set, the paths remaining to
+  // sync and the path that was modified during a sync
+  // are filtered out if they are not under the new root.
+  self.setRoot = function(newRoot, callback) {
+    function containsRoot(pathOrObj) {
+      var path = pathOrObj;
+      if(typeof pathOrObj === 'object') {
+        path = pathOrObj.path || '';
+      }
+
+      return !!(path.indexOf(newRoot) === 0);
+    }
+
+    fs.lstat(newRoot, function(err, stats) {
+      if(err) {
+        return callback(err);
+      }
+
+      if(!stats.isDirectory()) {
+        return callback(new Filer.Errors.ENOTDIR('the given root is not a directory', newRoot));
+      }
+
+      fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+        if(err) {
+          return callback(err);
+        }
+
+        root = newRoot;
+
+        if(!pathsToSync) {
+          return callback();
+        }
+
+        if(pathsToSync.toSync) {
+          pathsToSync.toSync = pathsToSync.toSync.filter(containsRoot);
+
+          if(!pathsToSync.toSync.length) {
+            delete pathsToSync.toSync;
+          }
+        }
+
+        if(pathsToSync.modified && !containsRoot(pathsToSync.modified)) {
+          delete pathsToSync.modified;
+        }
+
+        callback();
+      });
+    });
+  };
 
   // The following non-modifying fs operations can be run as normal,
   // and are simply forwarded to the fs instance. NOTE: we have
@@ -63,7 +192,7 @@ function SyncFileSystem(fs) {
   // for syncing (i.e., changes we need to sync back to the server), such that we
   // can track things. Different fs methods need to do this in slighly different ways,
   // but the overall logic is the same.  The wrapMethod() fn defines this logic.
-  function wrapMethod(method, pathArgPos, setUnsyncedFn, useParentPath) {
+  function wrapMethod(method, pathArgPos, setUnsyncedFn, mode) {
     return function() {
       var args = Array.prototype.slice.call(arguments, 0);
       var lastIdx = args.length - 1;
@@ -74,6 +203,27 @@ function SyncFileSystem(fs) {
       // second for some.
       var pathOrFD = args[pathArgPos];
 
+      function wrappedCallback() {
+        var args = Array.prototype.slice.call(arguments, 0);
+        if(args[0]) {
+          return callback(args[0]);
+        }
+
+        setUnsyncedFn(pathOrFD, function(err) {
+          if(err) {
+            return callback(err);
+          }
+          callback.apply(null, args);
+        });
+      }
+
+      args[lastIdx] = wrappedCallback;
+
+      if(mode === syncModes.DELETE && pathOrFD === root) {
+        // Deal with deletion of the sync root
+        // https://github.com/mozilla/makedrive/issues/465
+      }
+
       // Don't record extra sync-level details about modifications to an
       // existing conflicted copy, since we don't sync them.
       conflict.isConflictedCopy(fs, pathOrFD, function(err, conflicted) {
@@ -83,44 +233,51 @@ function SyncFileSystem(fs) {
           return callback.apply(null, [err]);
         }
 
-        // In most cases we want to use the path itself, but in the case
-        // that a node is being removed, we want the parent dir.
-        pathOrFD = useParentPath ? Path.dirname(pathOrFD) : pathOrFD;
         conflicted = !!conflicted;
 
-        // If we try to remove or rename the sync root, change the root
-        // to the parent of the current sync root.
-        if(useParentPath && pathOrFD === root) {
-          root = Path.dirname(pathOrFD);
-        }
-
-        // Check to see if it is a non-conflicted path or an open file descriptor
-        // and only record the path if it is contained in the specified
-        // syncing root of the filesystem.
+        // Check to see if it is a path or an open file descriptor
+        // and do not record the path if it is not contained
+        // in the specified syncing root of the filesystem, or if it is conflicted.
         // TODO: Deal with a case of fs.open for a path with a write flag
         // https://github.com/mozilla/makedrive/issues/210.
-        if(!conflicted && !fs.openFiles[pathOrFD] && pathOrFD.indexOf(root) === 0) {
-          self.pathToSync = pathOrFD;
-          // Record the path that was modified on the fs
-          fs.modifiedPath = pathOrFD;
+        if(fs.openFiles[pathOrFD] || pathOrFD.indexOf(root) !== 0 || conflicted) {
+          fs[method].apply(fs, args);
+          return;
         }
 
-        args[lastIdx] = function wrappedCallback() {
-          var args = Array.prototype.slice.call(arguments, 0);
-          // Error object on callback, bail now
-          if(args[0]) {
-            return callback.apply(null, args);
+        // Queue the path for syncing in the pathsToSync
+        // xattr on the sync root
+        fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+          var syncPath = {
+            path: pathOrFD,
+            type: mode
+          };
+          var indexInPathsToSync;
+
+          if(err) {
+            return callback(err);
           }
 
-          setUnsyncedFn(pathOrFD, function(err) {
+          pathsToSync = pathsToSync || {};
+          pathsToSync.toSync = pathsToSync.toSync || [];
+          indexInPathsToSync = pathsToSync.indexOf(pathOrFD);
+
+          if(indexInPathsToSync === 0) {
+            // If at the top of pathsToSync, the path is
+            // currently syncing so change the modified path
+            pathsToSync.modified = pathOrFD;
+          } else if(indexInPathsToSync === -1) {
+            pathsToSync.toSync.push(syncPath);
+          }
+
+          fsUtils.setPathsToSync(fs, root, pathsToSync, function(err) {
             if(err) {
               return callback(err);
             }
-            callback.apply(null, args);
-          });
-        };
 
-        fs[method].apply(fs, args);
+            fs[method].apply(fs, args);
+          });
+        });
       });
     };
   }
@@ -128,28 +285,28 @@ function SyncFileSystem(fs) {
   // Wrapped fs methods that have path at first arg position and use paths
   ['truncate', 'mknod', 'mkdir', 'utimes', 'writeFile',
    'appendFile'].forEach(function(method) {
-     self[method] = wrapMethod(method, 0, setUnsynced);
+     self[method] = wrapMethod(method, 0, setUnsynced, syncModes.CREATE);
   });
 
   // Wrapped fs methods that have path at second arg position
   ['link', 'symlink'].forEach(function(method) {
-    self[method] = wrapMethod(method, 1, setUnsynced);
+    self[method] = wrapMethod(method, 1, setUnsynced, syncModes.CREATE);
   });
 
   // Wrapped fs methods that have path at second arg position, and need to use the parent path.
   ['rename'].forEach(function(method) {
-    self[method] = wrapMethod(method, 1, setUnsynced, true);
+    self[method] = wrapMethod(method, 1, setUnsynced, syncModes.RENAME);
   });
 
   // Wrapped fs methods that use file descriptors
   ['ftruncate', 'futimes', 'write'].forEach(function(method) {
-    self[method] = wrapMethod(method, 0, fsetUnsynced);
+    self[method] = wrapMethod(method, 0, fsetUnsynced, syncModes.CREATE);
   });
 
   // Wrapped fs methods that have path at first arg position and use parent
   // path for writing unsynced metadata (i.e., removes node)
   ['rmdir', 'unlink'].forEach(function(method) {
-    self[method] = wrapMethod(method, 0, setUnsynced, true);
+    self[method] = wrapMethod(method, 0, setUnsynced, syncModes.DELETE);
   });
 
   // We also want to do extra work in the case of a rename.
@@ -192,48 +349,6 @@ function SyncFileSystem(fs) {
   };
   self.fgetUnsynced = function(fd, callback) {
     fsUtils.fgetUnsynced(fs, fd, callback);
-  };
-
-  // Expose a setter for the sync root
-  self.setRoot = function(path, callback) {
-    if(!path) {
-      root = '/';
-      self.pathToSync = root;
-      fs.modifiedPath = null;
-
-      return callback();
-    }
-
-    fs.lstat(path, function(err, stats) {
-      if(!err) {
-        if(!stats.isDirectory()) {
-          return callback(new Filer.Errors.ENOTDIR(path + ' is not a directory'));
-        }
-
-        root = path;
-        self.pathToSync = root;
-        fs.modifiedPath = null;
-
-        return;
-      }
-
-      // Fatal error
-      if(err.code !== 'ENOENT') {
-        return callback(err);
-      }
-
-      fs.mkdir(path, function(err) {
-        if(err) {
-          return callback(err);
-        }
-
-        root = path;
-        self.pathToSync = root;
-        fs.modifiedPath = null;
-
-        callback();
-      });
-    });
   };
 }
 
