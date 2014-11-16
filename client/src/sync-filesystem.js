@@ -16,10 +16,8 @@ function SyncFileSystem(fs) {
 
   // Expose the root used to sync for the filesystem
   // Defaults to '/'
-  Object.defineProperties(self, {
-    'root': {
-      get: function() { return root; }
-    }
+  Object.defineProperty(self, 'root', {
+    get: function() { return root; }
   });
 
   // Get the paths queued up to sync

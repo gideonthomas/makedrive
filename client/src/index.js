@@ -74,14 +74,12 @@
  * sync.SYNC_CONNECTING = "SYNC CONNECTING"
  * sync.SYNC_CONNECTED = "SYNC CONNECTED"
  * sync.SYNC_SYNCING = "SYNC SYNCING"
- * sync.SYNC_ERROR = "SYNC ERROR"
  */
 
 var SyncManager = require('./sync-manager.js');
 var SyncFileSystem = require('./sync-filesystem.js');
 var Filer = require('../../lib/filer.js');
 var EventEmitter = require('events').EventEmitter;
-var resolvePath = require('../../lib/sync-path-resolver.js').resolveFromArray;
 var log = require('./logger.js');
 
 var MakeDrive = {};
@@ -125,22 +123,19 @@ function createFS(options) {
   var fs = new SyncFileSystem(_fs);
   var sync = fs.sync = new EventEmitter();
   var manager;
+  var downstreaming = [];
+  Object.defineProperty(sync, 'downstreaming', {
+    get: function() { return downstreaming; }
+  });
 
   // Auto-sync handles
   var autoSync;
-  var pathCache;
-
-  // Path that needs to be used for an upstream sync
-  // to sync files that were determined to be more 
-  // up-to-date on the client during a downstream sync
-  var upstreamPath;
 
   // State of the sync connection
   sync.SYNC_DISCONNECTED = "SYNC DISCONNECTED";
   sync.SYNC_CONNECTING = "SYNC CONNECTING";
   sync.SYNC_CONNECTED = "SYNC CONNECTED";
   sync.SYNC_SYNCING = "SYNC SYNCING";
-  sync.SYNC_ERROR = "SYNC ERROR";
 
   // Intitially we are not connected
   sync.state = sync.SYNC_DISCONNECTED;
@@ -170,34 +165,6 @@ function createFS(options) {
     manager = null;
   }
 
-  function requestSync(path) {
-    // If we're not connected (or are already syncing), ignore this request
-    if(sync.state === sync.SYNC_DISCONNECTED || sync.state === sync.SYNC_ERROR) {
-      sync.emit('error', new Error('Invalid state. Expected ' + sync.SYNC_CONNECTED + ', got ' + sync.state));
-      log.warn('Tried to sync in invalid state: ' + sync.state);
-      return;
-    }
-
-    // If there were no changes to the filesystem and
-    // no path was passed to sync, ignore this request
-    if(!fs.pathToSync && !path) {
-      log.debug('Skipping sync request, no changes to sync');
-      return;
-    }
-
-    // If a path was passed sync using it
-    if(path) {
-      log.info('Requesting sync for ' + path);
-      return manager.syncPath(path);
-    }
-
-    // Cache the path that needs to be synced for error recovery
-    pathCache = fs.pathToSync;
-    fs.pathToSync = null;
-    log.info('Requesting sync for ' + pathCache);
-    manager.syncPath(pathCache);
-  }
-
   // Turn on auto-syncing if its not already on
   sync.auto = function(interval) {
     var syncInterval = interval|0 > 0 ? interval|0 : 15 * 1000;
@@ -220,18 +187,12 @@ function createFS(options) {
   };
 
   // The server stopped our upstream sync mid-way through.
-  sync.onInterrupted = function() {
-    fs.pathToSync = pathCache;
-    sync.state = sync.SYNC_CONNECTED;
-    sync.emit('error', new Error('Sync interrupted by server.'));
-    log.warn('Sync interrupted by server, caching current path: ' + pathCache);
+  sync.onInterrupted = function(path) {
+    sync.emit('error', new Error('Sync interrupted by server for path ' + path));
+    log.warn('Sync interrupted by server for ' + path);
   };
 
   sync.onError = function(err) {
-    // Regress to the path that needed to be synced but failed
-    // (likely because of a sync LOCK)
-    fs.pathToSync = upstreamPath || pathCache;
-    sync.state = sync.SYNC_ERROR;
     sync.emit('error', err);
     log.error('Sync error', err);
   };
@@ -253,22 +214,24 @@ function createFS(options) {
   };
 
   // Request that a sync begin.
+  // sync.request does not take any parameters
+  // as the path to sync is determined internally
   sync.request = function() {
-    // sync.request does not take any parameters
-    // as the path to sync is determined internally
-    // requestSync on the other hand optionally takes
-    // a path to sync which can be specified for
-    // internal use
-    requestSync();
+    if(sync.state === sync.SYNC_CONNECTING || sync.state === sync.SYNC_DISCONNECTED) {
+      sync.emit('error', new Error('MakeDrive error: MakeDrive cannot sync as it is either disconnected or trying to connect'));
+      log.warn('Tried to sync in invalid state: ' + sync.state);
+      return;
+    }
+
+    log.info('Requesting sync');
+    manager.sync();
   };
 
   // Try to connect to the server.
   sync.connect = function(url, token) {
     // Bail if we're already connected
-    if(sync.state !== sync.SYNC_DISCONNECTED &&
-       sync.state !== sync.ERROR) {
+    if(sync.state !== sync.SYNC_DISCONNECTED) {
       log.warn('Tried to connect, but already connected');
-      sync.emit('error', new Error("MakeDrive: Attempted to connect to \"" + url + "\", but a connection already exists!"));
       return;
     }
 
@@ -281,91 +244,6 @@ function createFS(options) {
     log.info('Connecting to MakeDrive server');
     sync.state = sync.SYNC_CONNECTING;
 
-    function downstreamSyncCompleted(paths, needUpstream) {
-      var startTime;
-
-      // Re-wire message handler functions for regular syncing
-      // now that initial downstream sync is completed.
-      sync.onSyncing = function() {
-        sync.state = sync.SYNC_SYNCING;
-        sync.emit('syncing');
-        log.info('Started syncing');
-        startTime = Date.now();
-      };
-
-      sync.onCompleted = function(paths, needUpstream) {
-        // If changes happened to the files that needed to be synced
-        // during the sync itself, they will be overwritten
-        // https://github.com/mozilla/makedrive/issues/129
-
-        function complete() {
-          sync.state = sync.SYNC_CONNECTED;
-          sync.emit('completed');
-          var duration = (Date.now() - startTime) + 'ms';
-          log.info('Completed syncing in ' + duration);
-        }
-
-        if(!paths && !needUpstream) {
-          return complete();
-        }
-
-        // Changes in the client are newer (determined during
-        // the sync) and need to be upstreamed
-        if(needUpstream) {
-          upstreamPath = resolvePath(needUpstream);
-          complete();
-          log.debug('Client changes are newer for ' + upstreamPath);
-          return requestSync(upstreamPath);
-        }
-
-        // If changes happened during a downstream sync
-        // Change the path that needs to be synced
-        manager.resetUnsynced(paths, function(err) {
-          if(err) {
-            log.error('Error resetting unsynced paths for ' + paths, err);
-            return sync.onError(err);
-          }
-
-          upstreamPath = null;
-          complete();
-        });
-      };
-
-      // Upgrade connection state to 'connected'
-      sync.state = sync.SYNC_CONNECTED;
-
-      // If we're in manual mode, bail before starting auto-sync
-      if(options.manual) {
-        sync.manual();
-      } else {
-        sync.auto(options.interval);
-      }
-
-      // In a browser, try to clean-up after ourselves when window goes away
-      if("onbeforeunload" in global) {
-        log.debug('Adding window.beforeunload handler');
-        global.addEventListener('beforeunload', windowCloseHandler);
-      }
-      if("onunload" in global){
-        log.debug('Adding window.unload handler');
-        global.addEventListener('unload', cleanupManager);
-      }
-
-      log.info('Connected');
-      sync.emit('connected');
-
-      // If the downstream was completed and some
-      // versions of files were not synced as they were
-      // newer on the client, upstream them
-      if(needUpstream) {
-        upstreamPath = resolvePath(needUpstream);
-        log.debug('Client changes are newer for ' + upstreamPath);
-        requestSync(upstreamPath);
-      } else {
-        upstreamPath = null;
-      }
-    }
-
     function connect(token) {
       // Try to connect to provided server URL. Use the raw Filer fs
       // instance for all rsync operations on the filesystem, so that we
@@ -377,20 +255,52 @@ function createFS(options) {
           sync.onError(err);
           return;
         }
+        // If we're in manual mode, bail before starting auto-sync
+        if(options.manual) {
+          sync.manual();
+        } else {
+          sync.auto(options.interval);
+        }
 
-        var startTime;
+        // In a browser, try to clean-up after ourselves when window goes away
+        if("onbeforeunload" in global) {
+          global.addEventListener('beforeunload', windowCloseHandler);
+        }
+        if("onunload" in global){
+          global.addEventListener('unload', cleanupManager);
+        }
 
-        // Wait on initial downstream sync events to complete
-        sync.onSyncing = function() {
-          // do nothing, wait for onCompleted()
-          log.info('Starting initial downstream sync');
-          startTime = Date.now();
+        // Deals with race conditions if a sync was
+        // started immediately after connecting before
+        // this callback could be triggered
+        if(sync.state !== sync.SYNC_SYNCING) {
+          sync.state = sync.SYNC_CONNECTED;
+          sync.emit('connected');
+        }
+
+        sync.onSyncing = function(path) {
+          sync.state = sync.SYNC_SYNCING;
+          sync.emit('syncing', 'Sync started for ' + path);
         };
-        sync.onCompleted = function(paths, needUpstream) {
-          // Downstream sync is done, finish connect() setup
-          var duration = (Date.now() - startTime) + 'ms';
-          log.info('Completed initial downstream sync in ' + duration);
-          downstreamSyncCompleted(paths, needUpstream);
+
+        sync.onCompleted = function(path, remaining) {
+          if(remaining) {
+            downstreaming = remaining;
+          }
+          sync.emit('completed', 'Sync completed for ' + path);
+        };
+
+        // This is called when all nodes have been synced
+        // upstream and all downstream syncs have completed
+        sync.allCompleted = function() {
+          downstreaming = [];
+
+          if(sync.state !== sync.SYNC_DISCONNECTED) {
+            // Reset the state if it was not done already
+            sync.state = sync.SYNC_CONNECTED;
+          }
+
+          sync.emit('completed', 'MakeDrive has been synced');
         };
       });
     }
@@ -400,10 +310,8 @@ function createFS(options) {
   // Disconnect from the server
   sync.disconnect = function() {
     // Bail if we're not already connected
-    if(sync.state === sync.SYNC_DISCONNECTED ||
-       sync.state === sync.ERROR) {
+    if(sync.state === sync.SYNC_DISCONNECTED) {
       log.warn('Tried to disconnect while not connected');
-      sync.emit('error', new Error("MakeDrive: Attempted to disconnect, but no server connection exists!"));
       return;
     }
 
@@ -411,7 +319,6 @@ function createFS(options) {
     if(autoSync) {
       clearInterval(autoSync);
       autoSync = null;
-      fs.pathToSync = null;
     }
 
     // Do a proper network shutdown
