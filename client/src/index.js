@@ -347,4 +347,3 @@ MakeDrive.fs = function(options) {
   }
   return sharedFS;
 };
-
