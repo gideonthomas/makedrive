@@ -123,9 +123,9 @@ function createFS(options) {
   var fs = new SyncFileSystem(_fs);
   var sync = fs.sync = new EventEmitter();
   var manager;
-  var downstreaming = [];
-  Object.defineProperty(sync, 'downstreaming', {
-    get: function() { return downstreaming; }
+  var downstreamQueue = [];
+  Object.defineProperty(sync, 'downstreamQueue', {
+    get: function() { return downstreamQueue; }
   });
 
   // Auto-sync handles
@@ -276,31 +276,53 @@ function createFS(options) {
         if(sync.state !== sync.SYNC_SYNCING) {
           sync.state = sync.SYNC_CONNECTED;
           sync.emit('connected');
+          log.info('MakeDrive connected to server');
         }
 
         sync.onSyncing = function(path) {
           sync.state = sync.SYNC_SYNCING;
           sync.emit('syncing', 'Sync started for ' + path);
+          log.info('Sync started for ' + path);
         };
 
-        sync.onCompleted = function(path, remaining) {
-          if(remaining) {
-            downstreaming = remaining;
+        sync.onCompleted = function(path, downstreamRemaining) {
+          // A downstream sync was just completed
+          // update the queue
+          if(downstreamRemaining) {
+            downstreamQueue = downstreamRemaining;
           }
-          sync.emit('completed', 'Sync completed for ' + path);
+
+          fs.getPathsToSync(function(err, pathsToSync) {
+            var syncsLeft;
+
+            if(err) {
+              sync.emit('error', err);
+              log.error('Error retrieving paths to sync after sync completed for ' + path + ' with error', err);
+              return;
+            }
+
+            syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
+
+            if(!syncsLeft.length) {
+              sync.allCompleted();
+              return;
+            }
+
+            sync.emit('completed', 'Sync completed for ' + path);
+            log.info('Sync completed for ' + path);
+          });
         };
 
         // This is called when all nodes have been synced
         // upstream and all downstream syncs have completed
         sync.allCompleted = function() {
-          downstreaming = [];
-
           if(sync.state !== sync.SYNC_DISCONNECTED) {
             // Reset the state if it was not done already
             sync.state = sync.SYNC_CONNECTED;
           }
 
           sync.emit('completed', 'MakeDrive has been synced');
+          log.info('All syncs completed');
         };
       });
     }
