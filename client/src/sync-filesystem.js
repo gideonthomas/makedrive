@@ -13,12 +13,33 @@ var syncModes = require('../../lib/constants.js').syncModes;
 function SyncFileSystem(fs) {
   var self = this;
   var root = '/';
+  // Record changes during a downstream sync
+  var recordChanges = false;
+  var changesDuringDownstream = [];
 
   // Expose the root used to sync for the filesystem
   // Defaults to '/'
-  Object.defineProperty(self, 'root', {
-    get: function() { return root; }
+  Object.defineProperties(self, {
+    'root': {
+      get: function() { return root; }
+    },
+    'record': {
+      set: function(value) {
+        recordChanges = value;
+
+        if(!value) {
+          changesDuringDownstream = [];
+        }
+      }
+    },
+    'changesDuringDownstream': {
+      get: function() { return changesDuringDownstream; }
+    }
   });
+
+  self.removeFromDownstreamTracking = function(path) {
+    changesDuringDownstream.splice(changesDuringDownstream.indexOf(path), 1);
+  };
 
   // Get the paths queued up to sync
   self.getPathsToSync = function(callback) {
@@ -28,6 +49,23 @@ function SyncFileSystem(fs) {
       }
 
       callback(null, pathsToSync && pathsToSync.toSync);
+    });
+  };
+
+  // Add paths to the sync queue where paths is an array
+  self.appendPathsToSync = function(paths, callback) {
+    paths = paths.filter(function(path) {
+      return !!(path.indexOf(root) === 0);
+    });
+
+    fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+      if(err) {
+        return callback(err);
+      }
+
+      pathsToSync.toSync = pathsToSync.toSync.concat(paths);
+
+      fsUtils.setPathsToSync(fs, root, pathsToSync, callback);
     });
   };
 
@@ -241,6 +279,10 @@ function SyncFileSystem(fs) {
         if(fs.openFiles[pathOrFD] || pathOrFD.indexOf(root) !== 0 || conflicted) {
           fs[method].apply(fs, args);
           return;
+        }
+
+        if(recordChanges && self.changesDuringDownstream.indexOf(pathOrFD) === -1) {
+          self.changedDuringDownstream.push(pathOrFD);
         }
 
         // Queue the path for syncing in the pathsToSync

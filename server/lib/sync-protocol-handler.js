@@ -45,7 +45,7 @@ function ensureClient(client) {
   // If we're in an unexpected state for syncing (i.e., not a sync step), log that
   switch(client.state) {
     case ServerStates.CREATED:
-    case ServerStates.CLOSESD:
+    case ServerStates.CLOSED:
     case ServerStates.CLOSING:
     case ServerStates.CONNECTING:
     case ServerStates.ERROR:
@@ -54,6 +54,19 @@ function ensureClient(client) {
   }
 
   return client;
+}
+
+function findPathIndexinArray(array, path) {
+  var index;
+
+  for(i = 0; i < array.length; i++) {
+    if(array[i].path === path) {
+      index = i;
+      i = array.length + 1;
+    }
+  }
+
+  return index;
 }
 
 SyncProtocolHandler.prototype.handleMessage = function(message) {
@@ -180,7 +193,7 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
 
   if(message.is.reset && !client.is.downstreaming) {
     this.handleUpstreamReset(message);
-  } else if(message.is.diffs && client.is.downstreaming) {
+  } else if(message.is.diffs) {
     this.handleDiffRequest(message);
   } else if(message.is.sync && !client.is.downstreaming) {
     this.handleSyncInitRequest(message);
@@ -195,8 +208,10 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
 SyncProtocolHandler.prototype.handleResponse = function(message) {
   var client = ensureClient(this.client);
 
-  if (message.is.reset || message.is.authz) {
+  if (message.is.reset) {
     this.handleDownstreamReset(message);
+  } else if(message.is.authz) {
+    this.handleFullDownstream(message);
   } else if(message.is.diffs && client.is.patch) {
     this.handleDiffResponse(message);
   } else if(message.is.patch && client.is.downstreaming) {
@@ -528,47 +543,102 @@ SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
 /**
  * Downstream Sync Steps
  */
+SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
+  var client = ensureClient(this.client);
+  var fs = client.fs;
+
+  // N/I
+  var syncs = getListOfSyncs(client.fs);
+
+  // Nothing in the filesystem, so nothing to sync
+  if(!syncs.length) {
+    client.state = states.LISTENING;
+    return;
+  }
+
+  client.outOfDate = syncs;
+  client.currentDownstream = [];
+  client.state = states.SYNCING;
+
+  // For each path in the filesystem, generate the source list and
+  // trigger a downstream sync
+  syncs.forEach(function(syncInfo) {
+    var path = syncInfo.path;
+    var response;
+
+    rsync.sourceList(fs, path, rsyncOptions, function(err, sourceList) {
+      var syncInfoCopy = {};
+
+      if(err) {
+        log.error({err: err, client: client}, 'rsync.sourceList() error for ' + syncs[0].paths);
+        // N/I
+        client.delaySync(path);
+        response = SyncMessage.error.srclist;
+      } else {
+        response = SyncMessage.request.chksum;
+        response.content = { path: path, srclist: sourceList };
+
+        // Make a copy so that we don't store the sync times in the
+        // list of paths that need to be eventually synced
+        Object.keys(syncInfo).forEach(function(key) {
+          syncInfoCopy[key] = syncInfo[key];
+        });
+
+        syncInfoCopy._syncStarted = Date.now();
+        client.currentDownstream.push(syncInfoCopy);
+      }
+
+      client.sendMessage(response);
+    });
+  });
+};
+
 SyncProtocolHandler.prototype.handleDiffRequest = function(message) {
   var client = ensureClient(this.client);
   var response;
+  var path;
+  var checksums;
 
-  if(!message.content || !message.content.checksums) {
+  if(!message.content || !message.content.path || !message.content.checksums) {
     log.warn({client: client, syncMessage: message}, 'Missing content.checksums in handleDiffRequest()');
     return client.sendMessage(SyncMessage.error.content);
   }
 
-  // We reject downstream sync SyncMessages unless the sync
-  // is part of an initial downstream sync for a connection
-  // or no upstream sync is in progress.
-  SyncLock.isUserLocked(client.username, function(err, locked) {
+  path = message.content.path;
+
+  // We reject downstream sync SyncMessages unless
+  // no upstream sync is in progress.
+  SyncLock.isUserLocked(client.username, path, function(err, locked) {
     if(err) {
       log.error({err: err, client: client}, 'Error trying to look-up lock for user with redis');
-      delete client._syncStarted;
-      response = SyncMessage.error.srclist;
+      client.delaySync(path);
+      response = SyncMessage.error.diffs;
+      response.content = {path: path};
       client.sendMessage(response);
       return;
     }
 
-    if(locked && !client.is.initiating) {
+    if(locked) {
       response = SyncMessage.error.downstreamLocked;
-      client.downstreamInterrupted = true;
-      delete client._syncStarted;
+      response.content = {path: path};
+      client.delaySync(path);
       client.sendMessage(response);
       return;
     }
 
-    var checksums = message.content.checksums;
+    checksums = message.content.checksums;
 
-    rsync.diff(client.fs, client.path, checksums, rsyncOptions, function(err, diffs) {
+    rsync.diff(client.fs, path, checksums, rsyncOptions, function(err, diffs) {
       if(err) {
-        log.error({err: err, client: client}, 'rsync.diff() error');
-        delete client._syncStarted;
+        log.error({err: err, client: client}, 'rsync.diff() error for ' + path);
+        client.delaySync(path);
         response = SyncMessage.error.diffs;
+        response.content = {path: path};
       } else {
         response = SyncMessage.response.diffs;
         response.content = {
           diffs: diffHelper.serialize(diffs),
-          path: client.path
+          path: path
         };
       }
 
@@ -663,7 +733,23 @@ SyncProtocolHandler.prototype.handleRootResponse = function(message) {
     return;
   }
 
-  client.state = States.LISTENING;
-  delete client._syncStarted;
-  log.info({client: client}, 'Ignored downstream sync due to path to sync being out of client\'s root');
+  if(!message.content || !message.content.path) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleRootResponse');
+    return client.sendMessage(SyncMessage.error.content);
+  }
+
+  var path = message.content.path;
+  var currentDownstreams = client.currentDownstream;
+  var remainingDownstreams = client.outOfDate;
+  var indexInCurrent = findPathIndexinArray(currentDownstreams, path);
+  var indexInOutOfDate = findPathIndexinArray(remainingDownstreams, path);
+
+  if(!indexInCurrent) {
+    log.warn({client: client, syncMessage: message}, 'Client sent a path in handleRootResponse that is not currently downstreaming');
+    return;
+  }
+
+  client.currentDownstream.splice(indexInCurrent, 1);
+  client.outOfDate.splice(indexInOutOfDate, 1);
+  log.info({client: client}, 'Ignored downstream sync due to ' + path + ' being out of client\'s root');
 };

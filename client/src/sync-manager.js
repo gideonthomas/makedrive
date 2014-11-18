@@ -11,32 +11,7 @@ function SyncManager(sync, fs, _fs) {
   manager.sync = sync;
   manager.fs = fs;
   manager.rawFs = _fs;
-  manager.session = {
-    step: steps.SYNCED,
-    path: '/',
-
-    is: Object.create(Object.prototype, {
-      // Steps
-      init: {
-        get: function() { return manager.session.step === steps.INIT; }
-      },
-      chksum: {
-        get: function() { return manager.session.step === steps.CHKSUM; }
-      },
-      diffs: {
-        get: function() { return manager.session.step === steps.DIFFS; }
-      },
-      patch: {
-        get: function() { return manager.session.step === steps.PATCH; }
-      },
-      synced: {
-        get: function() { return manager.session.step === steps.SYNCED; }
-      },
-      failed: {
-        get: function() { return manager.session.step === steps.FAILED; }
-      }
-    })
-  };
+  manager.downstreams = [];
 }
 
 SyncManager.prototype.init = function(wsUrl, token, options, callback) {

@@ -9,6 +9,7 @@ var steps = require('./sync-steps');
 var dirname = require('../../lib/filer').Path.dirname;
 var async = require('../../lib/async-lite');
 var fsUtils = require('../../lib/fs-utils');
+var log = require('./logger.js');
 
 function onError(syncManager, err) {
   syncManager.session.step = steps.FAILED;
@@ -31,32 +32,41 @@ function hasCommonPath(masterPath, path) {
 function handleRequest(syncManager, data) {
   var fs = syncManager.fs;
   var sync = syncManager.sync;
-  var session = syncManager.session;
 
   function handleChecksumRequest() {
     var message;
+    var path;
+    var srcList;
+
+    if(!data.content || !data.content.path || !data.content.srclist) {
+      log.error('Path or source list not sent by server in handleChecksumRequest.', data);
+      return onError(syncManager, new Error('Server sent insufficient content'));
+    }
+
+    path = data.content.path;
+    srcList = data.content.srcList;
 
     // If the server requests to downstream a path that is not in the
     // root, ignore the downstream.
-    if(data.content.path.indexOf(fs.root) !== 0) {
+    if(path.indexOf(fs.root) !== 0) {
       message = SyncMessage.response.root;
+      message.content = {path: path};
+      log.info('Ignoring downstream sync for ' + path);
       return syncManager.send(message.stringify());
     }
 
-    var srcList = session.srcList = data.content.srcList;
-    session.path = data.content.path;
-    fs.modifiedPath = null;
-    sync.onSyncing();
+    syncManager.downstreams.push(path);
+    sync.onSyncing(path);
 
-    rsync.checksums(fs, session.path, srcList, rsyncOptions, function(err, checksums) {
+    rsync.checksums(fs, path, srcList, rsyncOptions, function(err, checksums) {
       if (err) {
+        log.error('Failed to generate checksums for ' + path + ' during downstream sync', err);
         return onError(syncManager, err);
       }
 
-      session.step = steps.PATCH;
-
+      fs.record = true;
       message = SyncMessage.request.diffs;
-      message.content = {checksums: checksums};
+      message.content = {path: path, checksums: checksums};
       syncManager.send(message.stringify());
     });
   }
@@ -76,8 +86,7 @@ function handleRequest(syncManager, data) {
   }
 
 
-  if(data.is.chksum && session.is.ready &&
-     (session.is.synced || session.is.failed)) {
+  if(data.is.chksum) {
     // DOWNSTREAM - CHKSUM
     handleChecksumRequest();
   } else if(data.is.diffs && session.is.syncing && session.is.diffs) {

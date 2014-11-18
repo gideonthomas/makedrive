@@ -280,36 +280,45 @@ function createFS(options) {
         }
 
         sync.onSyncing = function(path) {
+          // A downstream sync might have just started,
+          // update the queue
+          downstreamQueue = manager.downstreams;
           sync.state = sync.SYNC_SYNCING;
           sync.emit('syncing', 'Sync started for ' + path);
           log.info('Sync started for ' + path);
         };
 
-        sync.onCompleted = function(path, downstreamRemaining) {
-          // A downstream sync was just completed
+        sync.onCompleted = function(path, needsUpstream) {
+          // A downstream sync might have completed,
           // update the queue
-          if(downstreamRemaining) {
-            downstreamQueue = downstreamRemaining;
-          }
+          downstreamQueue = manager.downstreams;
 
-          fs.getPathsToSync(function(err, pathsToSync) {
-            var syncsLeft;
-
+          fs.appendPathsToSync(needsUpstream, function(err) {
             if(err) {
               sync.emit('error', err);
-              log.error('Error retrieving paths to sync after sync completed for ' + path + ' with error', err);
+              log.error('Error appending paths to upstream after sync completed for ' + path + ' with error', err);
               return;
             }
 
-            syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
+            fs.getPathsToSync(function(err, pathsToSync) {
+              var syncsLeft;
 
-            if(!syncsLeft.length) {
-              sync.allCompleted();
-              return;
-            }
+              if(err) {
+                sync.emit('error', err);
+                log.error('Error retrieving paths to sync after sync completed for ' + path + ' with error', err);
+                return;
+              }
 
-            sync.emit('completed', 'Sync completed for ' + path);
-            log.info('Sync completed for ' + path);
+              syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
+
+              if(!syncsLeft.length) {
+                sync.allCompleted();
+                return;
+              }
+
+              sync.emit('completed', 'Sync completed for ' + path);
+              log.info('Sync completed for ' + path);
+            });
           });
         };
 
