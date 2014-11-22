@@ -300,6 +300,8 @@ function createFS(options) {
               return;
             }
 
+            manager.needsUpstream = [];
+
             fs.getPathsToSync(function(err, pathsToSync) {
               var syncsLeft;
 

@@ -14,7 +14,7 @@ function SyncFileSystem(fs) {
   var self = this;
   var root = '/';
   // Record changes during a downstream sync
-  var recordChanges = false;
+  var recordedPaths = [];
   var changesDuringDownstream = [];
 
   // Expose the root used to sync for the filesystem
@@ -23,21 +23,17 @@ function SyncFileSystem(fs) {
     'root': {
       get: function() { return root; }
     },
-    'record': {
-      set: function(value) {
-        recordChanges = value;
-
-        if(!value) {
-          changesDuringDownstream = [];
-        }
-      }
-    },
     'changesDuringDownstream': {
       get: function() { return changesDuringDownstream; }
     }
   });
 
-  self.removeFromDownstreamTracking = function(path) {
+  self.record = function(path) {
+    recordedPaths.push(path);
+  };
+
+  self.stopRecording = function(path) {
+    recordedPaths.splice(recordedPaths.indexOf(path), 1);
     changesDuringDownstream.splice(changesDuringDownstream.indexOf(path), 1);
   };
 
@@ -54,6 +50,10 @@ function SyncFileSystem(fs) {
 
   // Add paths to the sync queue where paths is an array
   self.appendPathsToSync = function(paths, callback) {
+    if(!paths || !paths.length) {
+      return callback();
+    }
+
     paths = paths.filter(function(path) {
       return !!(path.indexOf(root) === 0);
     });
@@ -63,7 +63,14 @@ function SyncFileSystem(fs) {
         return callback(err);
       }
 
-      pathsToSync.toSync = pathsToSync.toSync.concat(paths);
+      var toSync = pathsToSync.toSync;
+
+      // Ignore redundancies
+      paths.forEach(function(path) {
+        if(toSync.indexOf(path) === -1) {
+          pathsToSync.toSync.push(path);
+        }
+      });
 
       fsUtils.setPathsToSync(fs, root, pathsToSync, callback);
     });
@@ -281,8 +288,8 @@ function SyncFileSystem(fs) {
           return;
         }
 
-        if(recordChanges && self.changesDuringDownstream.indexOf(pathOrFD) === -1) {
-          self.changedDuringDownstream.push(pathOrFD);
+        if(recordedPaths.indexOf(pathOrFD) !== -1 && self.changesDuringDownstream.indexOf(pathOrFD) === -1) {
+          self.changesDuringDownstream.push(pathOrFD);
         }
 
         // Queue the path for syncing in the pathsToSync

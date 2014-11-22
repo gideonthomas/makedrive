@@ -47,7 +47,7 @@ function runClient(client) {
   };
 
   // Send an AUTHZ response to let client know normal sync'ing can begin.
-  client.state = States.INIT;
+  client.state = States.LISTENING;
   client.sendMessage(SyncMessage.response.authz);
   log.debug({client: client}, 'Starting authorized client session');
 }

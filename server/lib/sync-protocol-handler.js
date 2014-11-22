@@ -214,7 +214,7 @@ SyncProtocolHandler.prototype.handleResponse = function(message) {
     this.handleFullDownstream(message);
   } else if(message.is.diffs && client.is.patch) {
     this.handleDiffResponse(message);
-  } else if(message.is.patch && client.is.downstreaming) {
+  } else if(message.is.patch) {
     this.handlePatchResponse(message);
   } else if(message.is.root && client.is.downstreaming) {
     this.handleRootResponse(message);
@@ -552,13 +552,11 @@ SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
 
   // Nothing in the filesystem, so nothing to sync
   if(!syncs.length) {
-    client.state = states.LISTENING;
     return;
   }
 
   client.outOfDate = syncs;
   client.currentDownstream = [];
-  client.state = states.SYNCING;
 
   // For each path in the filesystem, generate the source list and
   // trigger a downstream sync
@@ -573,10 +571,10 @@ SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
         log.error({err: err, client: client}, 'rsync.sourceList() error for ' + syncs[0].paths);
         // N/I
         client.delaySync(path);
-        response = SyncMessage.error.srclist;
+        response = SyncMessage.error.sourceList;
       } else {
-        response = SyncMessage.request.chksum;
-        response.content = { path: path, srclist: sourceList };
+        response = SyncMessage.request.checksums;
+        response.content = { path: path, sourceList: sourceList };
 
         // Make a copy so that we don't store the sync times in the
         // list of paths that need to be eventually synced
@@ -599,7 +597,11 @@ SyncProtocolHandler.prototype.handleDiffRequest = function(message) {
   var path;
   var checksums;
 
-  if(!message.content || !message.content.path || !message.content.checksums) {
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent(['checksums'])) {
     log.warn({client: client, syncMessage: message}, 'Missing content.checksums in handleDiffRequest()');
     return client.sendMessage(SyncMessage.error.content);
   }
@@ -607,7 +609,7 @@ SyncProtocolHandler.prototype.handleDiffRequest = function(message) {
   path = message.content.path;
 
   // We reject downstream sync SyncMessages unless
-  // no upstream sync is in progress.
+  // no upstream sync for that path is in progress.
   SyncLock.isUserLocked(client.username, path, function(err, locked) {
     if(err) {
       log.error({err: err, client: client}, 'Error trying to look-up lock for user with redis');
@@ -695,12 +697,17 @@ SyncProtocolHandler.prototype.handleDownstreamReset = function(message) {
 SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
   var client = ensureClient(this.client);
 
-  if(!message.content || !message.content.checksums) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.checksums expected by handlePatchResponse');
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent(['checksums'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.checksums in handlePatchResponse()');
     return client.sendMessage(SyncMessage.error.content);
   }
 
   var checksums = message.content.checksums;
+  var path = message.content.path;
 
   rsync.utils.compareContents(client.fs, checksums, function(err, equal) {
     var response;
@@ -709,19 +716,19 @@ SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
     // return value. 1. equal = true, 2. equal = false, 3. equal = undefined
     // we want to send error verification in case of err return or equal is false.
     if(equal) {
-      client.state = States.LISTENING;
       response = SyncMessage.response.verification;
+      // N/I
+      client.endDownstream(path);
     } else {
       response = SyncMessage.error.verification;
     }
 
-    var duration = Date.now() - client._syncStarted;
-    delete client._syncStarted;
+    response.content = {path: path};
+
     var info = client.info();
     if(info) {
       info.downstreamSyncs++;
     }
-    log.info({client: client}, 'Completed downstream sync to client in %s ms', duration);
 
     client.sendMessage(response);
   });

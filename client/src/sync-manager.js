@@ -12,6 +12,7 @@ function SyncManager(sync, fs, _fs) {
   manager.fs = fs;
   manager.rawFs = _fs;
   manager.downstreams = [];
+  manager.needsUpstream = [];
 }
 
 SyncManager.prototype.init = function(wsUrl, token, options, callback) {
