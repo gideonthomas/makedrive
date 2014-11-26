@@ -14,6 +14,7 @@ var States = Constants.server.states;
 var redis = require('../redis-clients.js');
 var util = require('util');
 var log = require('./logger.js');
+var findPathIndexinArray = require('./util.js').findPathIndexinArray;
 
 var noop = function(){};
 
@@ -204,7 +205,7 @@ Client.prototype.sendMessage = function(syncMessage) {
     if(info) {
       info.bytesSent += Buffer.byteLength(data, 'utf8');
     }
-    
+
     ws.send(syncMessage.stringify());
     log.debug({syncMessage: syncMessage, client: self}, 'Sending Sync Protocol Message');
   } catch(err) {
@@ -213,6 +214,43 @@ Client.prototype.sendMessage = function(syncMessage) {
     self.state = States.ERROR;
     self.close();
   }
+};
+
+Client.prototype.delaySync = function(path) {
+  var self = this;
+  var delayedSync = self.currentDownstream.splice(findPathIndexinArray(self.currentDownstream, path), 1);
+  var syncTime;
+
+  if(delayedSync) {
+    syncTime = Date.now() - (delayedSync._syncStarted || 0);
+    log.info({client: self}, 'Downstream sync delayed for ' + path + ' after ' + syncTime + ' ms');
+  } else {
+    log.warn({client: self}, 'Sync entry not found in current downstreams when attempting to delay sync for ' + path);
+  }
+};
+
+Client.prototype.endDownstream = function(path) {
+  var self = this;
+  var indexInCurrent = findPathIndexinArray(self.currentDownstream, path);
+  var indexInOutOfDate = findPathIndexinArray(self.outOfDate, path);
+  var syncEnded;
+  var syncTime;
+
+  if(!indexInCurrent) {
+    log.warn({client: self}, 'Sync entry not found in current downstreams when attempting to end sync for ' + path);
+  } else {
+    syncEnded = self.currentDownstream.splice(indexInCurrent, 1);
+  }
+
+  syncTime = syncEnded ? Date.now() - syncEnded._syncStarted : 0;
+
+  if(!indexInOutOfDate) {
+    log.warn({client: self}, 'Sync entry not found in out of date list when attempting to end sync for ' + path);
+    return;
+  }
+
+  self.outOfDate.splice(indexInOutOfDate, 1);
+  log.info({client: self}, 'Downstream sync completed for ' + path + ' in ' + syncTime + ' ms');
 };
 
 module.exports = Client;

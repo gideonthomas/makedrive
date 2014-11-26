@@ -14,7 +14,9 @@ function SyncFileSystem(fs) {
   var self = this;
   var root = '/';
   // Record changes during a downstream sync
+  // Is a parallel array with sourceListCache
   var recordedPaths = [];
+  var sourceListCache = [];
   var changesDuringDownstream = [];
 
   // Expose the root used to sync for the filesystem
@@ -28,13 +30,16 @@ function SyncFileSystem(fs) {
     }
   });
 
-  self.record = function(path) {
+  self.record = function(path, sourceList) {
     recordedPaths.push(path);
+    sourceListCache.push(sourceList);
   };
 
   self.stopRecording = function(path) {
-    recordedPaths.splice(recordedPaths.indexOf(path), 1);
+    var indexInRecordedPaths = recordedPaths.indexOf(path);
+    recordedPaths.splice(indexInRecordedPaths, 1);
     changesDuringDownstream.splice(changesDuringDownstream.indexOf(path), 1);
+    return sourceListCache.splice(indexInRecordedPaths, 1);
   };
 
   // Get the paths queued up to sync

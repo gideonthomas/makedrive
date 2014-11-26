@@ -6,7 +6,6 @@ var serializeDiff = require('../../lib/diff').serialize;
 var deserializeDiff = require('../../lib/diff').deserialize;
 var states = require('./sync-states');
 var steps = require('./sync-steps');
-var dirname = require('../../lib/filer').Path.dirname;
 var async = require('../../lib/async-lite');
 var fsUtils = require('../../lib/fs-utils');
 var log = require('./logger.js');
@@ -16,17 +15,38 @@ function onError(syncManager, err) {
   syncManager.sync.onError(err);
 }
 
-// Checks if path is in masterPath
-function hasCommonPath(masterPath, path) {
-  if(masterPath === path) {
-    return true;
+function sendChecksums(syncManager, path, sourceList) {
+  var fs = syncManager.fs;
+  var rawFs = syncManager.rawFs;
+  var sync = syncManager.sync;
+  var message;
+
+  // If the server requests to downstream a path that is not in the
+  // root, ignore the downstream.
+  if(path.indexOf(fs.root) !== 0) {
+    message = SyncMessage.response.root;
+    message.content = {path: path};
+    log.info('Ignoring downstream sync for ' + path);
+    return syncManager.send(message.stringify());
   }
 
-  if(path === '/') {
-    return false;
-  }
+  syncManager.downstreams.push(path);
+  sync.onSyncing(path);
 
-  return hasCommonPath(masterPath, dirname(path));
+  rsync.checksums(rawFs, path, sourceList, rsyncOptions, function(err, checksums) {
+    if(err) {
+      log.error('Failed to generate checksums for ' + path + ' during downstream sync', err);
+      message = SyncMessage.request.delay;
+      message.content = {path: path};
+      syncManager.send(message.stringify());
+      return onError(syncManager, err);
+    }
+
+    fs.record(path, sourceList);
+    message = SyncMessage.request.diffs;
+    message.content = {path: path, checksums: checksums};
+    syncManager.send(message.stringify());
+  });
 }
 
 function handleRequest(syncManager, data) {
@@ -35,41 +55,12 @@ function handleRequest(syncManager, data) {
   var sync = syncManager.sync;
 
   function handleChecksumRequest() {
-    var message;
-    var path;
-    var sourceList;
-
     if(data.invalidContent(['sourceList'])) {
       log.error('Path or source list not sent by server in handleChecksumRequest.', data);
       return onError(syncManager, new Error('Server sent insufficient content'));
     }
 
-    path = data.content.path;
-    sourceList = data.content.sourceList;
-
-    // If the server requests to downstream a path that is not in the
-    // root, ignore the downstream.
-    if(path.indexOf(fs.root) !== 0) {
-      message = SyncMessage.response.root;
-      message.content = {path: path};
-      log.info('Ignoring downstream sync for ' + path);
-      return syncManager.send(message.stringify());
-    }
-
-    syncManager.downstreams.push(path);
-    sync.onSyncing(path);
-
-    rsync.checksums(rawFs, path, sourceList, rsyncOptions, function(err, checksums) {
-      if(err) {
-        log.error('Failed to generate checksums for ' + path + ' during downstream sync', err);
-        return onError(syncManager, err);
-      }
-
-      fs.record(path);
-      message = SyncMessage.request.diffs;
-      message.content = {path: path, checksums: checksums};
-      syncManager.send(message.stringify());
-    });
+    sendChecksums(data.content.path, data.content.sourceList);
   }
 
   function handleDiffRequest() {
@@ -103,27 +94,6 @@ function handleResponse(syncManager, data) {
   var rawFs = syncManager.rawFs;
   var sync = syncManager.sync;
   var session = syncManager.session;
-
-  function resendChecksums() {
-    if(!session.sourceList) {
-      // Sourcelist was somehow reset, the entire downstream sync
-      // needs to be restarted
-      session.step = steps.FAILED;
-      syncManager.send(SyncMessage.response.reset.stringify());
-      return onError(syncManager, new Error('Fatal Error: Could not sync filesystem from server...trying again!'));
-    }
-
-    rsync.checksums(fs, session.path, session.sourceList, rsyncOptions, function(err, checksums) {
-      if(err) {
-        syncManager.send(SyncMessage.response.reset.stringify());
-        return onError(syncManager, err);
-      }
-
-      var message = SyncMessage.request.diffs;
-      message.content = {checksums: checksums};
-      syncManager.send(message.stringify());
-    });
-  }
 
   function handleSourceListResponse() {
     session.state = states.SYNCING;
@@ -190,6 +160,8 @@ function handleResponse(syncManager, data) {
   }
 
   function handlePatchResponse() {
+    var message;
+
     if(data.invalidContent(['diffs'])) {
       log.error('Path or diffs not sent by server in handlePatchResponse.', data);
       return onError(syncManager, new Error('Server sent insufficient content'));
@@ -198,17 +170,19 @@ function handleResponse(syncManager, data) {
     var path = data.content.path;
     var diffs = deserializeDiff(data.content.diffs);
     var changedDuringDownstream = fs.changesDuringDownstream.indexOf(path);
-
-    fs.stopRecording(path);
+    var cachedSourceList = fs.stopRecording(path);
 
     if(changedDuringDownstream !== -1) {
-      // TODO: Resend checksums
-      return;
+      // Resend the checksums for that path
+      return sendChecksums(syncManager, path, cachedSourceList);
     }
 
     rsync.patch(rawFs, path, diffs, rsyncOptions, function(err, paths) {
       if(err) {
         log.error('Failed to patch ' + path + ' during downstream sync', err);
+        message = SyncMessage.request.delay;
+        message.content = {path: path};
+        syncManager.send(message.stringify());
         return onError(syncManager, err);
       }
 
@@ -217,10 +191,13 @@ function handleResponse(syncManager, data) {
       rsyncUtils.generateChecksums(fs, paths.synced, true, function(err, checksums) {
         if(err) {
           log.error('Failed to generate checksums for ' + paths.synced + ' during downstream patch', err);
+          message = SyncMessage.request.delay;
+          message.content = {path: path};
+          syncManager.send(message.stringify());
           return onError(syncManager, err);
         }
 
-        var message = SyncMessage.response.patch;
+        message = SyncMessage.response.patch;
         message.content = {path: path, checksums: checksums};
         syncManager.send(message.stringify());
       });

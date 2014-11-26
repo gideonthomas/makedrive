@@ -8,6 +8,7 @@ var SyncLock = require('./sync-lock.js');
 var redis = require('../redis-clients.js');
 var log = require('./logger.js');
 var Constants = require('../../lib/constants.js');
+var findPathIndexinArray = require('./util.js').findPathIndexinArray;
 var ServerStates = Constants.server.states;
 var rsyncOptions = Constants.rsyncDefaults;
 var States = Constants.server.states;
@@ -56,17 +57,26 @@ function ensureClient(client) {
   return client;
 }
 
-function findPathIndexinArray(array, path) {
-  var index;
-
-  for(i = 0; i < array.length; i++) {
-    if(array[i].path === path) {
-      index = i;
-      i = array.length + 1;
+function getListOfSyncs(fs, callback) {
+  fs.Shell().du('/', function(err, list) {
+    if(err) {
+      return callback(err);
     }
-  }
 
-  return index;
+    if(!list) {
+      return callback();
+    }
+
+    list = list.entries;
+
+    // Needs to be optimized as this array contains redundant syncs
+    // For e.g. the array will contain [{path: '/dir'}, {path: '/dir/file'}]
+    // In this case, the '/dir' entry can be removed because the sync for
+    // '/dir/file' will create '/dir'
+    return list.map(function(entry) {
+      return {path: entry.path};
+    });
+  });
 }
 
 SyncProtocolHandler.prototype.handleMessage = function(message) {
@@ -199,6 +209,8 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
     this.handleSyncInitRequest(message);
   } else if(message.is.chksum && client.is.chksum) {
     this.handleChecksumRequest(message);
+  } else if(message.is.delay) {
+    this.handleDelayRequest(message);
   } else {
     log.warn({syncMessage: message, client: client}, 'Unable to handle request at this time.');
     client.sendMessage(SyncProtocolHandler.error.request);
@@ -547,46 +559,49 @@ SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
   var client = ensureClient(this.client);
   var fs = client.fs;
 
-  // N/I
-  var syncs = getListOfSyncs(client.fs);
+  getListOfSyncs(client.fs, function(err, syncs) {
+    if(err) {
+      log.error({err: err, client: client}, 'fatal error generating list of syncs to occur in handleFullDownstream');
+      return;
+    }
 
-  // Nothing in the filesystem, so nothing to sync
-  if(!syncs.length) {
-    return;
-  }
+    // Nothing in the filesystem, so nothing to sync
+    if(!syncs || !syncs.length) {
+      return;
+    }
 
-  client.outOfDate = syncs;
-  client.currentDownstream = [];
+    client.outOfDate = syncs;
+    client.currentDownstream = [];
 
-  // For each path in the filesystem, generate the source list and
-  // trigger a downstream sync
-  syncs.forEach(function(syncInfo) {
-    var path = syncInfo.path;
-    var response;
+    // For each path in the filesystem, generate the source list and
+    // trigger a downstream sync
+    syncs.forEach(function(syncInfo) {
+      var path = syncInfo.path;
+      var response;
 
-    rsync.sourceList(fs, path, rsyncOptions, function(err, sourceList) {
-      var syncInfoCopy = {};
+      rsync.sourceList(fs, path, rsyncOptions, function(err, sourceList) {
+        var syncInfoCopy = {};
 
-      if(err) {
-        log.error({err: err, client: client}, 'rsync.sourceList() error for ' + syncs[0].paths);
-        // N/I
-        client.delaySync(path);
-        response = SyncMessage.error.sourceList;
-      } else {
-        response = SyncMessage.request.checksums;
-        response.content = { path: path, sourceList: sourceList };
+        if(err) {
+          log.error({err: err, client: client}, 'rsync.sourceList() error for ' + syncs[0].paths);
+          client.delaySync(path);
+          response = SyncMessage.error.sourceList;
+        } else {
+          response = SyncMessage.request.checksums;
+          response.content = {path: path, sourceList: sourceList};
 
-        // Make a copy so that we don't store the sync times in the
-        // list of paths that need to be eventually synced
-        Object.keys(syncInfo).forEach(function(key) {
-          syncInfoCopy[key] = syncInfo[key];
-        });
+          // Make a copy so that we don't store the sync times in the
+          // list of paths that need to be eventually synced
+          Object.keys(syncInfo).forEach(function(key) {
+            syncInfoCopy[key] = syncInfo[key];
+          });
 
-        syncInfoCopy._syncStarted = Date.now();
-        client.currentDownstream.push(syncInfoCopy);
-      }
+          syncInfoCopy._syncStarted = Date.now();
+          client.currentDownstream.push(syncInfoCopy);
+        }
 
-      client.sendMessage(response);
+        client.sendMessage(response);
+      });
     });
   });
 };
@@ -717,7 +732,6 @@ SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
     // we want to send error verification in case of err return or equal is false.
     if(equal) {
       response = SyncMessage.response.verification;
-      // N/I
       client.endDownstream(path);
     } else {
       response = SyncMessage.error.verification;
@@ -740,7 +754,7 @@ SyncProtocolHandler.prototype.handleRootResponse = function(message) {
     return;
   }
 
-  if(!message.content || !message.content.path) {
+  if(message.invalidContent()) {
     log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleRootResponse');
     return client.sendMessage(SyncMessage.error.content);
   }
@@ -759,4 +773,18 @@ SyncProtocolHandler.prototype.handleRootResponse = function(message) {
   client.currentDownstream.splice(indexInCurrent, 1);
   client.outOfDate.splice(indexInOutOfDate, 1);
   log.info({client: client}, 'Ignored downstream sync due to ' + path + ' being out of client\'s root');
+};
+
+SyncProtocolHandler.prototype.handleDelayRequest = function(message) {
+  var client = ensureClient(this.client);
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent()) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleDelayRequest');
+    return client.sendMessage(SyncMessage.error.content);
+  }
+
+  client.delaySync(message.content.path);
 };
