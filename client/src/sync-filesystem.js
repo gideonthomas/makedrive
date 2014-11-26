@@ -9,6 +9,7 @@ var Shell = require('../../lib/filer-shell.js');
 var fsUtils = require('../../lib/fs-utils.js');
 var conflict = require('../../lib/conflict.js');
 var syncModes = require('../../lib/constants.js').syncModes;
+var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 
 function SyncFileSystem(fs) {
   var self = this;
@@ -312,13 +313,13 @@ function SyncFileSystem(fs) {
 
           pathsToSync = pathsToSync || {};
           pathsToSync.toSync = pathsToSync.toSync || [];
-          indexInPathsToSync = pathsToSync.indexOf(pathOrFD);
+          indexInPathsToSync = findPathIndexinArray(pathsToSync.toSync, pathOrFD);
 
-          if(indexInPathsToSync === 0) {
+          if(indexInPathsToSync === 0 && pathsToSync.toSync[0].syncing) {
             // If at the top of pathsToSync, the path is
             // currently syncing so change the modified path
             pathsToSync.modified = pathOrFD;
-          } else if(indexInPathsToSync === -1) {
+          } else if(!indexInPathsToSync) {
             pathsToSync.toSync.push(syncPath);
           }
 

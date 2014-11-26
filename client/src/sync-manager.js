@@ -153,7 +153,7 @@ SyncManager.prototype.init = function(wsUrl, token, options, callback) {
   connect();
 };
 
-SyncManager.prototype.sync = function() {
+SyncManager.prototype.syncUpstream = function() {
   var manager = this;
   var fs = manager.fs;
   var sync = manager.sync;

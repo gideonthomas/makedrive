@@ -14,7 +14,7 @@ var States = Constants.server.states;
 var redis = require('../redis-clients.js');
 var util = require('util');
 var log = require('./logger.js');
-var findPathIndexinArray = require('./util.js').findPathIndexinArray;
+var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 
 var noop = function(){};
 

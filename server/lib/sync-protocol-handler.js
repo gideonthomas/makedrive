@@ -8,7 +8,7 @@ var SyncLock = require('./sync-lock.js');
 var redis = require('../redis-clients.js');
 var log = require('./logger.js');
 var Constants = require('../../lib/constants.js');
-var findPathIndexinArray = require('./util.js').findPathIndexinArray;
+var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 var ServerStates = Constants.server.states;
 var rsyncOptions = Constants.rsyncDefaults;
 var States = Constants.server.states;
@@ -205,7 +205,7 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
     this.handleUpstreamReset(message);
   } else if(message.is.diffs) {
     this.handleDiffRequest(message);
-  } else if(message.is.sync && !client.is.downstreaming) {
+  } else if(message.is.sync) {
     this.handleSyncInitRequest(message);
   } else if(message.is.chksum && client.is.chksum) {
     this.handleChecksumRequest(message);
@@ -267,45 +267,61 @@ function releaseLock(client) {
 
 SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
   var client = ensureClient(this.client);
+  var response;
+  var path;
+  var type;
+
   if(!client) {
     return;
   }
 
-  if(!message.content || !message.content.path) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleSyncInitRequest()');
-    return client.sendMessage(SyncMessage.error.content, true);
+  if(message.invalidContent(['type'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.path or content.type expected by handleSyncInitRequest()');
+    response = SyncMessage.error.content;
+    return client.sendMessage(response);
   }
 
-  SyncLock.request(client, function(err, lock) {
-    var response;
+  path = message.content.path;
+  type = message.content.type;
 
+  // The client has not downstreamed the file for which an upstream
+  // sync was requested.
+  if(findPathIndexinArray(client.outOfDate, path)) {
+    log.debug({client: client}, 'Upstream sync declined as downstream is required for ' + path);
+    response = SyncMessage.error.needsDownstream;
+    response.content = {path: path, type: type};
+    return client.sendMessage(response);
+  }
+
+  SyncLock.request(client, path, function(err, lock) {
     if(err) {
       log.error({err: err, client: client}, 'SyncLock.request() error');
       response = SyncMessage.error.impl;
+      response.content = {path: path, type: type};
     } else {
       if(lock) {
-        log.debug({client: client, syncLock: lock}, 'Lock request successful, lock acquired.');
+        log.debug({client: client, syncLock: lock}, 'Lock request successful, lock acquired for ' + path);
 
         lock.once('unlocked', function() {
-          log.debug({client: client, syncLock: lock}, 'Lock unlocked');
-          releaseLock(client);
+          log.debug({client: client, syncLock: lock}, 'Lock unlocked for ' + lock.path);
+          releaseLock(client, lock.path);
 
-          client.sendMessage(SyncMessage.error.interrupted);
+          var interruptedResponse = SyncMessage.error.interrupted;
+          interruptedResponse.content = {path: lock.path};
+          client.sendMessage(interruptedResponse);
         });
 
         client.lock = lock;
-        client.state = States.CHKSUM;
-        client.path = message.content.path;
 
         // Track the length of time this sync takes
-        client._syncStarted = Date.now();
+        client.upstreamSync = {path: path, type: type, started: Date.now()};
 
         response = SyncMessage.response.sync;
-        response.content = {path: message.content.path};
+        response.content = {path: path, type: type};
       } else {
-        log.debug({client: client}, 'Lock request unsuccessful, lock denied.');
+        log.debug({client: client}, 'Lock request unsuccessful, lock denied for ' + path);
         response = SyncMessage.error.locked;
-        response.content = {error: 'Sync already in progress.'};
+        response.content = {error: 'Sync already in progress', path: path, type: type};
       }
     }
 

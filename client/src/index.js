@@ -210,7 +210,7 @@ function createFS(options) {
 
     sync.state = sync.SYNC_DISCONNECTED;
     sync.emit('disconnected');
-    log.info('Disconnected');
+    log.info('Disconnected from MakeDrive server');
   };
 
   // Request that a sync begin.
@@ -224,7 +224,7 @@ function createFS(options) {
     }
 
     log.info('Requesting sync');
-    manager.sync();
+    manager.syncUpstream();
   };
 
   // Try to connect to the server.
