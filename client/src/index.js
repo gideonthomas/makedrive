@@ -292,6 +292,7 @@ function createFS(options) {
           // A downstream sync might have completed,
           // update the queue
           downstreamQueue = manager.downstreams;
+          needsUpstream = needsUpstream || [];
 
           fs.appendPathsToSync(needsUpstream, function(err) {
             if(err) {
@@ -300,7 +301,9 @@ function createFS(options) {
               return;
             }
 
-            manager.needsUpstream = [];
+            manager.needsUpstream = manager.needsUpstream.filter(function(upstreamPath) {
+              return needsUpstream.indexOf(upstreamPath) === -1;
+            });
 
             fs.getPathsToSync(function(err, pathsToSync) {
               var syncsLeft;

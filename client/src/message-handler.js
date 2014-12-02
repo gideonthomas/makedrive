@@ -52,7 +52,6 @@ function sendChecksums(syncManager, path, sourceList) {
 function handleRequest(syncManager, data) {
   var fs = syncManager.fs;
   var rawFs = syncManager.rawFs;
-  var sync = syncManager.sync;
 
   function handleChecksumRequest() {
     if(data.invalidContent(['sourceList'])) {
@@ -111,15 +110,14 @@ function handleRequest(syncManager, data) {
     // UPSTREAM - DIFFS
     handleDiffRequest();
   } else {
-    onError(syncManager, new Error('Failed to sync with the server. Current step is: ' +
-                                    session.step + '. Current state is: ' + session.state));  }
+    onError(syncManager, new Error('Failed to sync with the server.'));
+  }
 }
 
 function handleResponse(syncManager, data) {
   var fs = syncManager.fs;
   var rawFs = syncManager.rawFs;
   var sync = syncManager.sync;
-  var session = syncManager.session;
 
   function handleSourceListResponse() {
     if(data.invalidContent(['type'])) {
@@ -161,47 +159,68 @@ function handleResponse(syncManager, data) {
     });
   }
 
+  // As soon as an upstream sync happens, the file synced
+  // becomes the last synced version and must be stamped
+  // with its checksum to version it
   function handlePatchAckResponse() {
-    var syncedPaths = data.content.syncedPaths;
-    session.state = states.READY;
-    session.step = steps.SYNCED;
+    var syncedPath = data.content.path;
 
-    function stampChecksum(path, callback) {
-      fs.lstat(path, function(err, stats) {
+    function complete() {
+      fs.dequeueSync(function(err, syncsLeft, dequeuedSync) {
         if(err) {
-          if(err.code !== 'ENOENT') {
-            return callback(err);
-          }
-
-          // Non-existent paths (usually due to renames or
-          // deletes that are included in the syncedPaths)
-          // cannot be stamped with a checksum
-          return callback();
+          log.error('Failed to dequeue sync for ' + syncedPath + ' in handlePatchAckResponse, complete()');
         }
 
-        if(!stats.isFile()) {
-          return callback();
-        }
-
-        rsyncUtils.getChecksum(fs, path, function(err, checksum) {
-          if(err) {
-            return callback(err);
-          }
-
-          fsUtils.setChecksum(fs, path, checksum, callback);
-        });
+        sync.onCompleted(dequeuedSync || syncedPath);
       });
     }
 
-    // As soon as an upstream sync happens, the files synced
-    // become the last synced versions and must be stamped
-    // with their checksums to version them
-    async.eachSeries(syncedPaths, stampChecksum, function(err) {
+    fs.lstat(syncedPath, function(err, stats) {
       if(err) {
-        return onError(syncManager, err);
+        if(err.code !== 'ENOENT') {
+          log.error('Failed to access ' + syncedPath + ' in handlePatchAckResponse');
+          return fs.delaySync(function(delayErr, delayedPath) {
+            if(delayErr) {
+              log.error('Failed to delay upstream sync for ' + delayedPath + ' in handlePatchAckResponse');
+            }
+            onError(syncManager, err);
+          });
+        }
+
+        // Non-existent paths (usually due to renames or
+        // deletes cannot be stamped with a checksum
+        return complete();
       }
 
-      sync.onCompleted(data.content.syncedPaths);
+      if(!stats.isFile()) {
+        return complete();
+      }
+
+      rsyncUtils.getChecksum(rawFs, syncedPath, function(err, checksum) {
+        if(err) {
+          log.error('Failed to get the checksum for ' + syncedPath + ' in handlePatchAckResponse');
+          return fs.delaySync(function(delayErr, delayedPath) {
+            if(delayErr) {
+              log.error('Failed to delay upstream sync for ' + delayedPath + ' in handlePatchAckResponse while getting checksum');
+            }
+            onError(syncManager, err);
+          });
+        }
+
+        fsUtils.setChecksum(rawFs, syncedPath, checksum, function(err) {
+          if(err) {
+            log.error('Failed to stamp the checksum for ' + syncedPath + ' in handlePatchAckResponse');
+            return fs.delaySync(function(delayErr, delayedPath) {
+              if(delayErr) {
+                log.error('Failed to delay upstream sync for ' + delayedPath + ' in handlePatchAckResponse while setting checksum');
+              }
+              onError(syncManager, err);
+            });
+          }
+
+          complete();
+        });
+      });
     });
   }
 
@@ -232,7 +251,7 @@ function handleResponse(syncManager, data) {
         return onError(syncManager, err);
       }
 
-      syncManager.needsUpstream.push(paths.needsUpstream);
+      syncManager.needsUpstream = syncManager.needsUpstream ? syncManager.needsUpstream.concat(paths.needsUpstream) : paths.needsUpstream;
 
       rsyncUtils.generateChecksums(fs, paths.synced, true, function(err, checksums) {
         if(err) {
@@ -256,29 +275,21 @@ function handleResponse(syncManager, data) {
     sync.onCompleted(path, syncManager.needsUpstream);
   }
 
-  function handleUpstreamResetResponse() {
-    var message = SyncMessage.request.sync;
-    message.content = {path: session.path};
-    syncManager.send(message.stringify());
-  }
-
   if(data.is.sync) {
     // UPSTREAM - INIT
     handleSourceListResponse();
-  } else if(data.is.patch && session.is.syncing && session.is.patch) {
+  } else if(data.is.patch) {
     // UPSTREAM - PATCH
     handlePatchAckResponse();
   } else if(data.is.diffs) {
     // DOWNSTREAM - PATCH
     handlePatchResponse();
-  } else if(data.is.verification && session.is.ready && session.is.patch) {
+  } else if(data.is.verification) {
     // DOWNSTREAM - PATCH VERIFICATION
     handleVerificationResponse();
-  }  else if (data.is.reset && session.is.failed) {
-    handleUpstreamResetResponse();
-  } else {
-    onError(syncManager, new Error('Failed to sync with the server. Current step is: ' +
-                                    session.step + '. Current state is: ' + session.state));  }
+  }  else {
+    onError(syncManager, new Error('Failed to sync with the server.'));
+  }
 }
 
 function handleError(syncManager, data) {
