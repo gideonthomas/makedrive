@@ -197,7 +197,6 @@ SyncProtocolHandler.prototype.handleMessage = function(message) {
     this.handleResponse(message);
   } else {
     log.warn({client: client, syncMessage: message}, 'Invalid sync message type');
-    client.sendMessage(SyncProtocolHandler.error.type);
   }
 };
 
@@ -213,8 +212,7 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
   } else if(message.is.delay) {
     this.handleDelayRequest(message);
   } else {
-    log.warn({syncMessage: message, client: client}, 'Unable to handle request at this time.');
-    client.sendMessage(SyncProtocolHandler.error.request);
+    log.warn({syncMessage: message, client: client}, 'Client sent unknown request');
   }
 };
 
@@ -230,8 +228,7 @@ SyncProtocolHandler.prototype.handleResponse = function(message) {
   } else if(message.is.root) {
     this.handleRootResponse(message);
   } else {
-    log.warn({syncMessage: message, client: client}, 'Unable to handle response at this time.');
-    client.sendMessage(SyncProtocolHandler.error.response);
+    log.warn({syncMessage: message, client: client}, 'Client sent unknown response');
   }
 };
 
@@ -436,38 +433,24 @@ SyncProtocolHandler.prototype.end = function(patchResponse) {
     return;
   }
 
-  // Broadcast to (any) other clients for this username that there are changes
-  rsync.sourceList(client.fs, path, rsyncOptions, function(err, srcList) {
-    var response;
-
+  client.lock.release(function(err) {
     if(err) {
-      log.error({err: err, client: client}, 'rsync.sourceList() error for ' + path);
-      response = SyncMessage.error.srclist;
-      response.content = {path: path};
-    } else {
-      response = SyncMessage.request.checksum;
-      response.content = {srcList: srcList, path: path};
+      log.error({err: err, client: client}, 'Error releasing lock for ' + path);
     }
 
-    client.lock.release(function(err) {
-      if(err) {
-        log.error({err: err, client: client}, 'Error releasing lock for ' + path);
-      }
+    var duration = releaseLock(client);
+    client.upstreamSync = null;
+    var info = client.info();
+    if(info) {
+      info.upstreamSyncs++;
+    }
+    log.info({client: client}, 'Completed upstream sync to server for ' + path + ' in %s ms.', duration);
 
-      var duration = releaseLock(client);
-      client.upstreamSync = null;
-      var info = client.info();
-      if(info) {
-        info.upstreamSyncs++;
-      }
-      log.info({client: client}, 'Completed upstream sync to server for ' + path + ' in %s ms.', duration);
+    client.sendMessage(patchResponse);
 
-      client.sendMessage(patchResponse);
-
-      // Also let all other connected clients for this uesr know that
-      // they are now out of date, and need to do a downstream sync.
-      self.broadcastUpdate(response);
-    });
+    // Also let all other connected clients for this uesr know that
+    // they are now out of date, and need to do a downstream sync.
+    self.broadcastUpdate(path);
   });
 };
 
@@ -475,7 +458,7 @@ SyncProtocolHandler.prototype.end = function(patchResponse) {
 // other than the active sync client after an upstream sync process has completed.
 // Also, if any downstream syncs were interrupted during this upstream sync,
 // they will be retriggered when the message is received.
-SyncProtocolHandler.prototype.broadcastUpdate = function(response) {
+SyncProtocolHandler.prototype.broadcastUpdate = function(path) {
   var client = ensureClient(this.client);
   if(!client) {
     return;
@@ -488,7 +471,7 @@ SyncProtocolHandler.prototype.broadcastUpdate = function(response) {
   var msg = {
     username: client.username,
     id: client.id,
-    path: response.content.path
+    path: path
   };
 
   log.debug({client: client, syncMessage: msg}, 'Broadcasting out-of-date');

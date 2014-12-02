@@ -294,39 +294,33 @@ function handleResponse(syncManager, data) {
 
 function handleError(syncManager, data) {
   var sync = syncManager.sync;
-  var session = syncManager.session;
-  var message = SyncMessage.response.reset;
 
-  // DOWNSTREAM - ERROR
-  if((((data.is.sourceList && session.is.synced)) ||
-      (data.is.diffs && session.is.patch) && (session.is.ready || session.is.syncing))) {
-    session.state = states.READY;
-    session.step = steps.SYNCED;
+  function handleForcedDownstream() {}
 
-    syncManager.send(message.stringify());
-    onError(syncManager, new Error('Could not sync filesystem from server... trying again'));
-  } else if(data.is.verification && session.is.patch && session.is.ready) {
-    syncManager.send(message.stringify());
-    onError(syncManager, new Error('Could not sync filesystem from server... trying again'));
-  } else if(data.is.locked && session.is.ready && session.is.synced) {
-    // UPSTREAM - LOCK
-    onError(syncManager, new Error('Current sync in progress! Try again later!'));
-  } else if(((data.is.chksum && session.is.diffs) ||
-             (data.is.patch && session.is.patch)) &&
-            session.is.syncing) {
-    // UPSTREAM - ERROR
-    var message = SyncMessage.request.reset;
-    syncManager.send(message.stringify());
-    onError(syncManager, new Error('Could not sync filesystem from server... trying again'));
-  } else if(data.is.maxsizeExceeded) {
-    // We are only emitting the error since this is can be sync again from the client
-    syncManager.sync.emit('error', new Error('Maximum file size exceeded'));
-  } else if(data.is.interrupted && session.is.syncing) {
-    // SERVER INTERRUPTED SYNC (LOCK RELEASED EARLY)
-    sync.onInterrupted();
+  if(data.is.content) {
+    log.error('Invalid content was sent to the server');
+  } else if(data.is.needsDownstream) {
+    handleForcedDownstream();
+  } else if(data.is.impl) {
+    // Delay upstream sync
+  } else if(data.is.interrupted) {
+    // Sync lock was lost, upstream sync was interrupted, delay the upstream sync
+  } else if(data.is.locked) {
+    // Delay sync
+  } else if(data.is.checksum) {
+    // Delay sync
+  } else if(data.is.patch) {
+    // Delay sync
+  } else if(data.is.sourceList) {
+    // Fatal error - could not downstream as sourceList cannot be calculated on the server
+  } else if(data.is.diffs) {
+    // Remove from downstream queue and stop recording changes to the path
+  } else if(data.is.downstreamLocked) {
+    // Remove from downstream queue and stop recording changes to the path
+  } else if(data.is.verification) {
+    // Remove from downstream queue and stop recording changes to the path
   } else {
-    onError(syncManager, new Error('Failed to sync with the server. Current step is: ' +
-                                    session.step + '. Current state is: ' + session.state));
+    // Unknown error
   }
 }
 
