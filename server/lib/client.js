@@ -43,18 +43,11 @@ function handleBroadcastMessage(msg, client) {
     return;
   }
 
-  // Re-hydrate a full SyncMessage object from partial data sent via msg
-  var response = new SyncMessage.parse(msg.syncMessage);
+  client.outOfDate = client.outOfDate || [];
+  client.currentDownstream = client.currentDownstream || [];
+  client.outOfDate.push({path: msg.path});
 
-  // If this client was in the process of a downstream sync, we
-  // want to reactivate it with a path that is the common ancestor
-  // of the path originally being synced, and the path that was just
-  // updated in this upstream sync.
-  if(client.downstreamInterrupted) {
-    client.handler.restartDownstream(response.content.path);
-  } else {
-    client.handler.sendOutOfDate(response);
-  }
+  client.handler.syncDownstream();
 }
 
 function Client(ws) {
@@ -80,7 +73,6 @@ function Client(ws) {
   // whether or not we are in a sync step (e.g., patching) that will leave the
   // server's filesystem corrupt if not completed.
   self.closable = true;
-  self.path = '/';
   // We start using this in client-manager.js when a client is fully authenticated.
   self.handler = new SyncProtocolHandler(self);
 

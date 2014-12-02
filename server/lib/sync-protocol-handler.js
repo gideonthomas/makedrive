@@ -3,7 +3,6 @@ var rsync = require('../../lib/rsync');
 var diffHelper = require('../../lib/diff');
 var EventEmitter = require('events').EventEmitter;
 var util = require('util');
-var getCommonPath = require('../../lib/sync-path-resolver').resolve;
 var SyncLock = require('./sync-lock.js');
 var redis = require('../redis-clients.js');
 var log = require('./logger.js');
@@ -15,7 +14,6 @@ var States = Constants.server.states;
 
 var env = require('./environment.js');
 var MAX_SYNC_SIZE_BYTES = env.get('MAX_SYNC_SIZE_BYTES') || Math.Infinity;
-
 
 function SyncProtocolHandler(client) {
   EventEmitter.call(this);
@@ -57,8 +55,9 @@ function ensureClient(client) {
   return client;
 }
 
+// TODO: Fix with Dave's impl of Shell().find()
 function getListOfSyncs(fs, callback) {
-  fs.Shell().du('/', function(err, list) {
+  fs.Shell().find('/', function(err, list) {
     if(err) {
       return callback(err);
     }
@@ -79,20 +78,68 @@ function getListOfSyncs(fs, callback) {
   });
 }
 
-SyncProtocolHandler.prototype.handleMessage = function(message) {
-  var client = ensureClient(this.client);
-
-  if(message.is.request) {
-    log.debug({syncMessage: message, client: client}, 'Received sync protocol Request message');
-    this.handleRequest(message);
-  } else if(message.is.response) {
-    log.debug({syncMessage: message, client: client}, 'Received sync protocol Response message');
-    this.handleResponse(message);
-  } else {
-    log.warn({client: client, syncMessage: message}, 'Invalid sync message type');
-    client.sendMessage(SyncProtocolHandler.error.type);
+// Most upstream sync steps require a lock to be held.
+// It's a bug if we get into one of these steps without the lock.
+function ensureLock(client, path) {
+  var lock = client.lock;
+  if(!(lock && !('unlocked' in lock))) {
+    // Create an error so we get a stack, too.
+    var err = new Error('Attempted sync step without lock.');
+    log.error({client: client, err: err}, 'Client should own lock but does not for ' + path);
+    return false;
   }
-};
+  return true;
+}
+
+function releaseLock(client) {
+  client.lock.removeAllListeners();
+  client.lock = null;
+
+  // Figure out how long this sync was active
+  var startTime = client.upstreamSync.started;
+  return Date.now() - startTime;
+}
+
+// Returns true if file sizes are all within limit, false if not.
+// The client's lock is released, and an error sent to client in
+// the false case.
+function checkFileSizeLimit(client, srcList) {
+  function maxSizeExceeded(obj) {
+    var errorMsg;
+
+    client.lock.release(function(err) {
+      if(err) {
+        log.error({err: err, client: client}, 'Error releasing sync lock');
+      }
+
+      releaseLock(client);
+
+      errorMsg = SyncMessage.error.maxsizeExceeded;
+      errorMsg.content = {path: obj.path};
+      client.sendMessage(errorMsg);
+    });
+  }
+
+  for (var key in srcList) {
+    if(srcList.hasOwnProperty(key)) {
+      var obj = srcList[key];
+      for (var prop in obj) {
+        if(obj.hasOwnProperty(prop) && prop === 'size') {
+          if(obj.size > MAX_SYNC_SIZE_BYTES) {
+            // Fail this sync, contains a file that is too large.
+            log.warn({client: client},
+                     'Client tried to exceed file sync size limit: file was %s bytes, limit is %s',
+                     obj.size, MAX_SYNC_SIZE_BYTES);
+            maxSizeExceeded(obj);
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
 
 // Close and finalize the sync session
 SyncProtocolHandler.prototype.close = function(callback) {
@@ -139,75 +186,29 @@ SyncProtocolHandler.prototype.close = function(callback) {
   }
 };
 
-// If this client was in the process of a downstream sync, we
-// want to reactivate it with a path that is the common ancestor
-// of the path originally being synced, and the path that was just
-// updated in the upstream sync.
-SyncProtocolHandler.prototype.restartDownstream = function(path) {
+SyncProtocolHandler.prototype.handleMessage = function(message) {
   var client = ensureClient(this.client);
 
-  if(!client.downstreamInterrupted) {
-    log.warn({client: client}, 'Unexpected call to restartDownstream()');
-    return;
-  }
-
-  delete client.downstreamInterrupted;
-  client.state = States.OUT_OF_DATE;
-  client.path = getCommonPath(path, client.path);
-
-  rsync.sourceList(client.fs, client.path, rsyncOptions, function(err, srcList) {
-    var response;
-
-    if(err) {
-      log.error({err: err, client: client}, 'rsync.sourceList error');
-      response = SyncMessage.error.srclist;
-    } else {
-      response = SyncMessage.request.chksum;
-      response.content = {srcList: srcList, path: client.path};
-    }
-
-    client.sendMessage(response);
-  });
-};
-
-// When this client goes out of sync (i.e., another client for the same
-// user has finished an upstream sync).
-SyncProtocolHandler.prototype.sendOutOfDate = function(syncMessage) {
-  var client = ensureClient(this.client);
-
-  client.state = States.OUT_OF_DATE;
-  client.path = syncMessage.content.path;
-  client.sendMessage(syncMessage);
-};
-
-SyncProtocolHandler.error = {
-  get type() {
-    var message = SyncMessage.error.impl;
-    message.content = {error: 'The Sync message cannot be handled by the server'};
-    return message;
-  },
-  get request() {
-    var message = SyncMessage.error.impl;
-    message.content = {error: 'Request cannot be processed'};
-    return message;
-  },
-  get response() {
-    var message = SyncMessage.error.impl;
-    message.content = {error: 'The resource sent as a response cannot be processed'};
-    return message;
+  if(message.is.request) {
+    log.debug({syncMessage: message, client: client}, 'Received sync protocol Request message');
+    this.handleRequest(message);
+  } else if(message.is.response) {
+    log.debug({syncMessage: message, client: client}, 'Received sync protocol Response message');
+    this.handleResponse(message);
+  } else {
+    log.warn({client: client, syncMessage: message}, 'Invalid sync message type');
+    client.sendMessage(SyncProtocolHandler.error.type);
   }
 };
 
 SyncProtocolHandler.prototype.handleRequest = function(message) {
   var client = ensureClient(this.client);
 
-  if(message.is.reset && !client.is.downstreaming) {
-    this.handleUpstreamReset(message);
-  } else if(message.is.diffs) {
+  if(message.is.diffs) {
     this.handleDiffRequest(message);
   } else if(message.is.sync) {
     this.handleSyncInitRequest(message);
-  } else if(message.is.chksum && client.is.chksum) {
+  } else if(message.is.checksum) {
     this.handleChecksumRequest(message);
   } else if(message.is.delay) {
     this.handleDelayRequest(message);
@@ -220,15 +221,13 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
 SyncProtocolHandler.prototype.handleResponse = function(message) {
   var client = ensureClient(this.client);
 
-  if (message.is.reset) {
-    this.handleDownstreamReset(message);
-  } else if(message.is.authz) {
+  if(message.is.authz) {
     this.handleFullDownstream(message);
-  } else if(message.is.diffs && client.is.patch) {
+  } else if(message.is.diffs) {
     this.handleDiffResponse(message);
   } else if(message.is.patch) {
     this.handlePatchResponse(message);
-  } else if(message.is.root && client.is.downstreaming) {
+  } else if(message.is.root) {
     this.handleRootResponse(message);
   } else {
     log.warn({syncMessage: message, client: client}, 'Unable to handle response at this time.');
@@ -236,34 +235,9 @@ SyncProtocolHandler.prototype.handleResponse = function(message) {
   }
 };
 
-
 /**
  * Upstream Sync Steps
  */
-
-// Most upstream sync steps require a lock to be held.
-// It's a bug if we get into one of these steps without the lock.
-function ensureLock(client) {
-  var lock = client.lock;
-  if(!(lock && !('unlocked' in lock))) {
-    // Create an error so we get a stack, too.
-    var err = new Error('Attempted sync step without lock.');
-    log.error({client: client, err: err}, 'Client should own lock but does not.');
-    return false;
-  }
-  return true;
-}
-
-function releaseLock(client) {
-  client.lock.removeAllListeners();
-  client.lock = null;
-  client.state = States.LISTENING;
-
-  // Figure out how long this sync was active
-  var startTime = client._syncStarted;
-  delete client._syncStarted;
-  return Date.now() - startTime;
-}
 
 SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
   var client = ensureClient(this.client);
@@ -304,7 +278,7 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
 
         lock.once('unlocked', function() {
           log.debug({client: client, syncLock: lock}, 'Lock unlocked for ' + lock.path);
-          releaseLock(client, lock.path);
+          releaseLock(client);
 
           var interruptedResponse = SyncMessage.error.interrupted;
           interruptedResponse.content = {path: lock.path};
@@ -329,86 +303,171 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
   });
 };
 
-// Returns true if file sizes are all within limit, false if not.
-// The client's lock is released, and an error sent to client in
-// the false case.
-function checkFileSizeLimit(client, srcList) {
-  function maxSizeExceeded() {
-    client.lock.release(function(err) {
-      if(err) {
-        log.error({err: err, client: client}, 'Error releasing sync lock');
-      }
-
-      releaseLock(client);
-
-      client.sendMessage(SyncMessage.error.maxsizeExceeded);
-    });
-  }
-
-  for (var key in srcList) {
-    if(srcList.hasOwnProperty(key)) {
-      var obj = srcList[key];
-      for (var prop in obj) {
-        if(obj.hasOwnProperty(prop) && prop === 'size') {
-          if(obj.size > MAX_SYNC_SIZE_BYTES) {
-            // Fail this sync, contains a file that is too large.
-            log.warn({client: client},
-                     'Client tried to exceed file sync size limit: file was %s bytes, limit is %s',
-                     obj.size, MAX_SYNC_SIZE_BYTES);
-            maxSizeExceeded();
-            return false;
-          }
-        }
-      }
-    }
-  }
-
-  return true;
-}
-
 SyncProtocolHandler.prototype.handleChecksumRequest = function(message) {
   var client = ensureClient(this.client);
+  var response;
+  var path;
+  var type;
+  var sourceList;
+
   if(!client) {
     return;
   }
-  if(!ensureLock(client)) {
+
+  if(message.invalidContent(['type', 'sourceList'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing path, type or sourceList expected by handleChecksumRequest()');
+    response = SyncMessage.error.content;
+    return client.sendMessage(response);
+  }
+
+  path = message.content.path;
+  type = message.content.type;
+  sourceList = message.content.sourceList;
+
+  if(!ensureLock(client, path)) {
     return;
   }
-
-  if(!message.content || !message.content.srcList) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.srcList expected by handleChecksumRequest');
-    return client.sendMessage(SyncMessage.error.content);
-  }
-
-  var srcList = message.content.srcList;
 
   // Enforce sync file size limits (if set in .env)
-  if(!checkFileSizeLimit(client, srcList)) {
+  if(!checkFileSizeLimit(client, sourceList)) {
     return;
   }
 
-  rsync.checksums(client.fs, client.path, srcList, rsyncOptions, function(err, checksums) {
-    var response;
-
+  rsync.checksums(client.fs, path, sourceList, rsyncOptions, function(err, checksums) {
     if(err) {
       log.error({err: err, client: client}, 'rsync.checksums() error');
-      client.lock.release(function(err) {
+      client.lock.release(path, function(err) {
         if(err) {
           log.error({err: err, client: client}, 'Error releasing sync lock');
         }
 
         releaseLock(client);
 
-        response = SyncMessage.error.chksum;
+        response = SyncMessage.error.checksum;
+        response.content = {path: path, type: type};
         client.sendMessage(response);
       });
     } else {
       response = SyncMessage.request.diffs;
-      response.content = {checksums: checksums};
-      client.state = States.PATCH;
-
+      response.content = {path: path, type: type, checksums: checksums};
       client.sendMessage(response);
     }
+  });
+};
+
+SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
+  var client = ensureClient(this.client);
+  var sync = this;
+  var response;
+  var path;
+  var type;
+  var diffs;
+
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent(['type', 'diffs'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing path, type or diffs expected by handleDiffResponse()');
+    response = SyncMessage.error.content;
+    return client.sendMessage(response);
+  }
+
+  path = message.content.path;
+  type = message.content.type;
+  diffs = message.content.diffs;
+
+  if(!ensureLock(client, path)) {
+    return;
+  }
+
+  // Called when the client is closable again
+  function closable() {
+    client.closable = true;
+    sync.emit('closable');
+  }
+
+  // Flag that changes are being made to the filesystem,
+  // preventing actions that could interrupt this process
+  // and corrupt data.
+  try {
+    // Block attempts to stop this sync until the patch completes.
+    client.closable = false;
+
+    rsync.patch(client.fs, path, diffs, rsyncOptions, function(err) {
+      if(err) {
+        log.error({err: err, client: client}, 'rsync.patch() error');
+        client.lock.release(path, function(err) {
+          if(err) {
+            log.error({err: err, client: client}, 'Error releasing sync lock for ' + path);
+          }
+
+          releaseLock(client);
+
+          response = SyncMessage.error.patch;
+          response.content = {path: path, type: type};
+          client.sendMessage(response);
+          closable();
+        });
+      } else {
+        response = SyncMessage.response.patch;
+        response.content = {path: path, type: type};
+        sync.end(response);
+        closable();
+      }
+    });
+  } catch(e) {
+    // Handle rsync failing badly on a patch step
+    // TODO: https://github.com/mozilla/makedrive/issues/31
+    log.error({err: e, client: client}, 'rsync.patch() error on ' + path);
+  }
+};
+
+// End a completed sync for a client
+SyncProtocolHandler.prototype.end = function(patchResponse) {
+  var self = this;
+  var client = ensureClient(this.client);
+  var path = patchResponse.content.path;
+
+  if(!client) {
+    return;
+  }
+  if(!ensureLock(client, path)) {
+    return;
+  }
+
+  // Broadcast to (any) other clients for this username that there are changes
+  rsync.sourceList(client.fs, path, rsyncOptions, function(err, srcList) {
+    var response;
+
+    if(err) {
+      log.error({err: err, client: client}, 'rsync.sourceList() error for ' + path);
+      response = SyncMessage.error.srclist;
+      response.content = {path: path};
+    } else {
+      response = SyncMessage.request.checksum;
+      response.content = {srcList: srcList, path: path};
+    }
+
+    client.lock.release(function(err) {
+      if(err) {
+        log.error({err: err, client: client}, 'Error releasing lock for ' + path);
+      }
+
+      var duration = releaseLock(client);
+      client.upstreamSync = null;
+      var info = client.info();
+      if(info) {
+        info.upstreamSyncs++;
+      }
+      log.info({client: client}, 'Completed upstream sync to server for ' + path + ' in %s ms.', duration);
+
+      client.sendMessage(patchResponse);
+
+      // Also let all other connected clients for this uesr know that
+      // they are now out of date, and need to do a downstream sync.
+      self.broadcastUpdate(response);
+    });
   });
 };
 
@@ -429,151 +488,58 @@ SyncProtocolHandler.prototype.broadcastUpdate = function(response) {
   var msg = {
     username: client.username,
     id: client.id,
-    syncMessage: {
-      type: response.type,
-      name: response.name,
-      content: response.content
-    }
+    path: response.content.path
   };
 
-  log.debug({client: client, syncMessage: msg.syncMessage}, 'Broadcasting out-of-date');
+  log.debug({client: client, syncMessage: msg}, 'Broadcasting out-of-date');
   redis.publish(Constants.server.syncChannel, JSON.stringify(msg));
 };
-
-// End a completed sync for a client
-SyncProtocolHandler.prototype.end = function(patchResponse) {
-  var self = this;
-  var client = ensureClient(this.client);
-  if(!client) {
-    return;
-  }
-  if(!ensureLock(client)) {
-    return;
-  }
-
-  // Broadcast to (any) other clients for this username that there are changes
-  rsync.sourceList(client.fs, client.path, rsyncOptions, function(err, srcList) {
-    var response;
-
-    if(err) {
-      log.error({err: err, client: client}, 'rsync.sourceList error');
-      response = SyncMessage.error.srclist;
-    } else {
-      response = SyncMessage.request.chksum;
-      response.content = {srcList: srcList, path: client.path};
-    }
-
-    client.lock.release(function(err) {
-      if(err) {
-        log.error({err: err, client: client}, 'Error releasing lock');
-      }
-
-      var duration = releaseLock(client);
-      var info = client.info();
-      if(info) {
-        info.upstreamSyncs++;
-      }
-      log.info({client: client}, 'Completed upstream sync to server in %s ms.', duration);
-
-      client.sendMessage(patchResponse);
-
-      // Also let all other connected clients for this uesr know that
-      // they are now out of date, and need to do a downstream sync.
-      self.broadcastUpdate(response);
-    });
-  });
-};
-
-SyncProtocolHandler.prototype.handleUpstreamReset = function() {
-  var client = ensureClient(this.client);
-  if(!client) {
-    return;
-  }
-  if(!ensureLock(client)) {
-    return;
-  }
-
-  client.lock.release(function(err) {
-    if(err) {
-      log.error({err: err, client: client}, 'Error releasing lock');
-    }
-
-    releaseLock(client);
-
-    client.sendMessage(SyncMessage.response.reset);
-  });
-};
-
-SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
-  var sync = this;
-  var client = ensureClient(this.client);
-  if(!client) {
-    return;
-  }
-  if(!ensureLock(client)) {
-    return;
-  }
-
-  if(!message.content || !message.content.diffs) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.diffs expected by handleDiffResponse');
-    return client.sendMessage(SyncMessage.error.content);
-  }
-
-  var diffs = diffHelper.deserialize(message.content.diffs);
-  client.state = States.LISTENING;
-
-  // Called when the client is closable again
-  function closable() {
-    client.closable = true;
-    sync.emit('closable');
-  }
-
-  // Flag that changes are being made to the filesystem,
-  // preventing actions that could interrupt this process
-  // and corrupt data.
-  try {
-    // Block attempts to stop this sync until the patch completes.
-    client.closable = false;
-
-    rsync.patch(client.fs, client.path, diffs, rsyncOptions, function(err, paths) {
-      var response;
-
-      if(err) {
-        log.error({err: err, client: client}, 'rsync.patch() error');
-        client.lock.release(function(err) {
-          if(err) {
-            log.error({err: err, client: client}, 'Error releasing sync lock');
-          }
-
-          releaseLock(client);
-
-          response = SyncMessage.error.patch;
-          response.content = paths;
-          client.sendMessage(response);
-
-          closable();
-        });
-      } else {
-        response = SyncMessage.response.patch;
-        response.content = {syncedPaths: paths.synced};
-        sync.end(response);
-        closable();
-      }
-    });
-  } catch(e) {
-    // Handle rsync failing badly on a patch step
-    // TODO: https://github.com/mozilla/makedrive/issues/31
-    log.error({err: e, client: client}, 'rsync.patch() error');
-  }
-};
-
 
 /**
  * Downstream Sync Steps
  */
-SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
+
+SyncProtocolHandler.prototype.syncDownstream = function() {
   var client = ensureClient(this.client);
-  var fs = client.fs;
+  if(!client) {
+    return;
+  }
+
+  var syncs = client.outOfDate;
+
+  // For each path in the filesystem, generate the source list and
+  // trigger a downstream sync
+  syncs.forEach(function(syncInfo) {
+    var path = syncInfo.path;
+    var response;
+
+    rsync.sourceList(client.fs, path, rsyncOptions, function(err, sourceList) {
+      var syncInfoCopy = {};
+
+      if(err) {
+        log.error({err: err, client: client}, 'rsync.sourceList() error for ' + path);
+        response = SyncMessage.error.sourceList;
+      } else {
+        response = SyncMessage.request.checksums;
+        response.content = {path: path, sourceList: sourceList};
+
+        // Make a copy so that we don't store the sync times in the
+        // list of paths that need to be eventually synced
+        Object.keys(syncInfo).forEach(function(key) {
+          syncInfoCopy[key] = syncInfo[key];
+        });
+
+        syncInfoCopy._syncStarted = Date.now();
+        client.currentDownstream.push(syncInfoCopy);
+      }
+
+      client.sendMessage(response);
+    });
+  });
+};
+
+SyncProtocolHandler.prototype.handleFullDownstream = function() {
+  var client = ensureClient(this.client);
 
   getListOfSyncs(client.fs, function(err, syncs) {
     if(err) {
@@ -589,37 +555,49 @@ SyncProtocolHandler.prototype.handleFullDownstream = function(message) {
     client.outOfDate = syncs;
     client.currentDownstream = [];
 
-    // For each path in the filesystem, generate the source list and
-    // trigger a downstream sync
-    syncs.forEach(function(syncInfo) {
-      var path = syncInfo.path;
-      var response;
-
-      rsync.sourceList(fs, path, rsyncOptions, function(err, sourceList) {
-        var syncInfoCopy = {};
-
-        if(err) {
-          log.error({err: err, client: client}, 'rsync.sourceList() error for ' + syncs[0].paths);
-          client.delaySync(path);
-          response = SyncMessage.error.sourceList;
-        } else {
-          response = SyncMessage.request.checksums;
-          response.content = {path: path, sourceList: sourceList};
-
-          // Make a copy so that we don't store the sync times in the
-          // list of paths that need to be eventually synced
-          Object.keys(syncInfo).forEach(function(key) {
-            syncInfoCopy[key] = syncInfo[key];
-          });
-
-          syncInfoCopy._syncStarted = Date.now();
-          client.currentDownstream.push(syncInfoCopy);
-        }
-
-        client.sendMessage(response);
-      });
-    });
+    client.handler.syncDownstream();
   });
+};
+
+SyncProtocolHandler.prototype.handleRootResponse = function(message) {
+  var client = ensureClient(this.client);
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent()) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleRootResponse');
+    return client.sendMessage(SyncMessage.error.content);
+  }
+
+  var path = message.content.path;
+  var currentDownstreams = client.currentDownstream;
+  var remainingDownstreams = client.outOfDate;
+  var indexInCurrent = findPathIndexinArray(currentDownstreams, path);
+  var indexInOutOfDate = findPathIndexinArray(remainingDownstreams, path);
+
+  if(!indexInCurrent) {
+    log.warn({client: client, syncMessage: message}, 'Client sent a path in handleRootResponse that is not currently downstreaming');
+    return;
+  }
+
+  client.currentDownstream.splice(indexInCurrent, 1);
+  client.outOfDate.splice(indexInOutOfDate, 1);
+  log.info({client: client}, 'Ignored downstream sync due to ' + path + ' being out of client\'s root');
+};
+
+SyncProtocolHandler.prototype.handleDelayRequest = function(message) {
+  var client = ensureClient(this.client);
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent()) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleDelayRequest');
+    return client.sendMessage(SyncMessage.error.content);
+  }
+
+  client.delaySync(message.content.path);
 };
 
 SyncProtocolHandler.prototype.handleDiffRequest = function(message) {
@@ -680,51 +658,6 @@ SyncProtocolHandler.prototype.handleDiffRequest = function(message) {
   });
 };
 
-SyncProtocolHandler.prototype.handleDownstreamReset = function(message) {
-  var client = ensureClient(this.client);
-  var response;
-
-  // We reject downstream sync SyncMessages unless the sync
-  // is part of an initial downstream sync for a connection
-  // or no upstream sync is in progress.
-  SyncLock.isUserLocked(client.username, function(err, locked) {
-    if(err) {
-      log.error({err: err, client: client}, 'Error trying to look up lock for user with redis');
-      response = SyncMessage.error.srclist;
-      client.sendMessage(response);
-      return;
-    }
-
-    if(locked && !client.is.initiating) {
-      response = SyncMessage.error.downstreamLocked;
-      client.downstreamInterrupted = true;
-      client.sendMessage(response);
-      return;
-    }
-
-    // Track the length of time this sync takes
-    client._syncStarted = Date.now();
-
-    rsync.sourceList(client.fs, '/', rsyncOptions, function(err, srcList) {
-      if(err) {
-        log.error({err: err, client: client}, 'rsync.sourceList() error');
-        delete client._syncStarted;
-        response = SyncMessage.error.srclist;
-      } else {
-        response = SyncMessage.request.chksum;
-        response.content = {srcList: srcList, path: '/'};
-
-        // `handleDownstreamReset` can be called for a client's initial downstream
-        // filesystem update, or as a trigger for a new one. The state of the `sync`
-        // object must be different in each case.
-        client.state = message.is.authz ? States.INIT : States.OUT_OF_DATE;
-      }
-
-      client.sendMessage(response);
-    });
-  });
-};
-
 SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
   var client = ensureClient(this.client);
 
@@ -762,45 +695,4 @@ SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
 
     client.sendMessage(response);
   });
-};
-
-SyncProtocolHandler.prototype.handleRootResponse = function(message) {
-  var client = ensureClient(this.client);
-  if(!client) {
-    return;
-  }
-
-  if(message.invalidContent()) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleRootResponse');
-    return client.sendMessage(SyncMessage.error.content);
-  }
-
-  var path = message.content.path;
-  var currentDownstreams = client.currentDownstream;
-  var remainingDownstreams = client.outOfDate;
-  var indexInCurrent = findPathIndexinArray(currentDownstreams, path);
-  var indexInOutOfDate = findPathIndexinArray(remainingDownstreams, path);
-
-  if(!indexInCurrent) {
-    log.warn({client: client, syncMessage: message}, 'Client sent a path in handleRootResponse that is not currently downstreaming');
-    return;
-  }
-
-  client.currentDownstream.splice(indexInCurrent, 1);
-  client.outOfDate.splice(indexInOutOfDate, 1);
-  log.info({client: client}, 'Ignored downstream sync due to ' + path + ' being out of client\'s root');
-};
-
-SyncProtocolHandler.prototype.handleDelayRequest = function(message) {
-  var client = ensureClient(this.client);
-  if(!client) {
-    return;
-  }
-
-  if(message.invalidContent()) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.path expected by handleDelayRequest');
-    return client.sendMessage(SyncMessage.error.content);
-  }
-
-  client.delaySync(message.content.path);
 };

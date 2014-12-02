@@ -159,7 +159,7 @@ function SyncFileSystem(fs) {
           return callback(err);
         }
 
-        callback(null, removedPath);
+        callback(null, pathsToSync.toSync, removedPath);
       });
     });
   };

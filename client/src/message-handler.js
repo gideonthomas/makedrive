@@ -64,15 +64,41 @@ function handleRequest(syncManager, data) {
   }
 
   function handleDiffRequest() {
-    rsync.diff(fs, session.path, data.content.checksums, rsyncOptions, function(err, diffs) {
+    if(data.invalidContent(['type', 'checksums'])) {
+      log.warn(data, 'Upstream sync message received from the server without sufficient information in handleDiffRequest');
+      return fs.delaySync(function(err, path) {
+        if(err) {
+          log.error(err, 'An error occured while updating paths to sync in handleDiffRequest');
+          return onError(syncManager, err);
+        }
+
+        log.info('Sync delayed for ' + path + ' in handleDiffRequest');
+        syncManager.currentSync = false;
+        syncManager.syncUpstream();
+      });
+    }
+
+    var path = data.content.path;
+    var type = data.content.type;
+    var checksums = data.content.checksums;
+
+    rsync.diff(rawFs, path, checksums, rsyncOptions, function(err, diffs) {
       if(err){
-        return onError(syncManager, err);
+        log.error(err, 'Error generating diffs in handleDiffRequest for ' + path);
+        return fs.delaySync(function(delayErr, delayedPath) {
+          if(delayErr) {
+            log.error(err, 'Error updating paths to sync in handleDiffRequest after failing to generate diffs for ' + path);
+            return onError(syncManager, delayErr);
+          }
+
+          log.info('Sync delayed for ' + delayedPath + ' in handleDiffRequest');
+          syncManager.currentSync = false;
+          syncManager.syncUpstream();
+        });
       }
 
-      session.step = steps.PATCH;
-
       var message = SyncMessage.response.diffs;
-      message.content = {diffs: serializeDiff(diffs)};
+      message.content = {path: path, type: type, diffs: serializeDiff(diffs)};
       syncManager.send(message.stringify());
     });
   }
@@ -81,7 +107,7 @@ function handleRequest(syncManager, data) {
   if(data.is.checksums) {
     // DOWNSTREAM - CHKSUM
     handleChecksumRequest();
-  } else if(data.is.diffs && session.is.syncing && session.is.diffs) {
+  } else if(data.is.diffs) {
     // UPSTREAM - DIFFS
     handleDiffRequest();
   } else {
@@ -96,21 +122,41 @@ function handleResponse(syncManager, data) {
   var session = syncManager.session;
 
   function handleSourceListResponse() {
-    session.state = states.SYNCING;
-    session.step = steps.INIT;
-    session.path = data.content.path;
-    sync.onSyncing();
+    if(data.invalidContent(['type'])) {
+      log.warn(data, 'Upstream sync message received from the server without sufficient information in handleSourceListResponse');
+      return fs.delaySync(function(err, path) {
+        if(err) {
+          log.error(err, 'An error occured while updating paths to sync in handleSourceListResponse');
+          return onError(syncManager, err);
+        }
 
-    rsync.sourceList(fs, session.path, rsyncOptions, function(err, sourceList) {
+        log.info('Sync delayed for ' + path + ' in handleSourceListResponse');
+        syncManager.currentSync = false;
+        syncManager.syncUpstream();
+      });
+    }
+
+    var path = data.content.path;
+
+    sync.onSyncing(path);
+
+    rsync.sourceList(rawFs, path, rsyncOptions, function(err, sourceList) {
       if(err){
-        syncManager.send(SyncMessage.request.reset.stringify());
-        return onError(syncManager, err);
+        log.error(err, 'Error generating source list in handleSourceListResponse for ' + path);
+        return fs.delaySync(function(delayErr, delayedPath) {
+          if(delayErr) {
+            log.error(err, 'Error updating paths to sync in handleSourceListResponse after failing to generate source list for ' + path);
+            return onError(syncManager, delayErr);
+          }
+
+          log.info('Sync delayed for ' + delayedPath + ' in handleSourceListResponse');
+          syncManager.currentSync = false;
+          syncManager.syncUpstream();
+        });
       }
 
-      session.step = steps.DIFFS;
-
-      var message = SyncMessage.request.chksum;
-      message.content = {sourceList: sourceList};
+      var message = SyncMessage.request.checksum;
+      message.content = {path: path, type: data.content.type, sourceList: sourceList};
       syncManager.send(message.stringify());
     });
   }

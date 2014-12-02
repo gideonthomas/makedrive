@@ -164,6 +164,11 @@ SyncManager.prototype.syncUpstream = function() {
     throw new Error('sync called before init');
   }
 
+  if(manager.currentSync) {
+    sync.onError(new Error('Sync currently underway'));
+    return;
+  }
+
   fs.getPathsToSync(function(err, pathsToSync) {
     if(err) {
       sync.onError(err);
@@ -175,11 +180,6 @@ SyncManager.prototype.syncUpstream = function() {
       return;
     }
 
-    if(manager.currentSync) {
-      sync.onError(new Error('Sync currently underway'));
-      return;
-    }
-
     syncInfo = pathsToSync[0];
 
     fs.setSyncing(function(err) {
@@ -188,6 +188,7 @@ SyncManager.prototype.syncUpstream = function() {
         return;
       }
 
+      manager.currentSync = true;
       syncRequest = SyncMessage.request.sync;
       syncRequest.content = {path: syncInfo.path, type: syncInfo.type};
       manager.send(syncRequest.stringify());
