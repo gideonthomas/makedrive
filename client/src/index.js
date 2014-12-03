@@ -186,7 +186,7 @@ function createFS(options) {
     }
   };
 
-  // The upstream sync was stopped mid-way through.
+  // The sync was stopped mid-way through.
   sync.onInterrupted = function(path) {
     sync.emit('error', new Error('Sync interrupted for path ' + path));
     log.warn('Sync interrupted by server for ' + path);

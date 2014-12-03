@@ -141,6 +141,41 @@ function checkFileSizeLimit(client, srcList) {
   return true;
 }
 
+function generateSourceListResponse(client, path, callback) {
+  rsync.sourceList(client.fs, path, rsyncOptions, function(err, sourceList) {
+    var response;
+
+    if(err) {
+      log.error({err: err, client: client}, 'rsync.sourceList() error for ' + path);
+      response = SyncMessage.error.sourceList;
+    } else {
+      response = SyncMessage.request.checksums;
+      response.content = {path: path, sourceList: sourceList};
+    }
+
+    callback(err, response);
+  });
+}
+
+function sendSourceList(client, syncInfo) {
+  var syncInfoCopy = {};
+
+  generateSourceListResponse(client, syncInfo.path, function(err, response) {
+    if(!err) {
+      // Make a copy so that we don't store the sync times in the
+      // list of paths that need to be eventually synced
+      Object.keys(syncInfo).forEach(function(key) {
+        syncInfoCopy[key] = syncInfo[key];
+      });
+
+      syncInfoCopy._syncStarted = Date.now();
+      client.currentDownstream.push(syncInfoCopy);
+    }
+
+    client.sendMessage(response);
+  });
+}
+
 // Close and finalize the sync session
 SyncProtocolHandler.prototype.close = function(callback) {
   var self = this;
@@ -261,7 +296,9 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
     log.debug({client: client}, 'Upstream sync declined as downstream is required for ' + path);
     response = SyncMessage.error.needsDownstream;
     response.content = {path: path, type: type};
-    return client.sendMessage(response);
+    client.sendMessage(response);
+    // Force the client to downstream that path
+    return sendSourceList(client, {path: path});
   }
 
   SyncLock.request(client, path, function(err, lock) {
@@ -340,7 +377,7 @@ SyncProtocolHandler.prototype.handleChecksumRequest = function(message) {
 
         releaseLock(client);
 
-        response = SyncMessage.error.checksum;
+        response = SyncMessage.error.checksums;
         response.content = {path: path, type: type};
         client.sendMessage(response);
       });
@@ -493,31 +530,7 @@ SyncProtocolHandler.prototype.syncDownstream = function() {
   // For each path in the filesystem, generate the source list and
   // trigger a downstream sync
   syncs.forEach(function(syncInfo) {
-    var path = syncInfo.path;
-    var response;
-
-    rsync.sourceList(client.fs, path, rsyncOptions, function(err, sourceList) {
-      var syncInfoCopy = {};
-
-      if(err) {
-        log.error({err: err, client: client}, 'rsync.sourceList() error for ' + path);
-        response = SyncMessage.error.sourceList;
-      } else {
-        response = SyncMessage.request.checksums;
-        response.content = {path: path, sourceList: sourceList};
-
-        // Make a copy so that we don't store the sync times in the
-        // list of paths that need to be eventually synced
-        Object.keys(syncInfo).forEach(function(key) {
-          syncInfoCopy[key] = syncInfo[key];
-        });
-
-        syncInfoCopy._syncStarted = Date.now();
-        client.currentDownstream.push(syncInfoCopy);
-      }
-
-      client.sendMessage(response);
-    });
+    sendSourceList(client, syncInfo);
   });
 };
 

@@ -4,9 +4,7 @@ var rsyncUtils = rsync.utils;
 var rsyncOptions = require('../../lib/constants').rsyncDefaults;
 var serializeDiff = require('../../lib/diff').serialize;
 var deserializeDiff = require('../../lib/diff').deserialize;
-var states = require('./sync-states');
 var steps = require('./sync-steps');
-var async = require('../../lib/async-lite');
 var fsUtils = require('../../lib/fs-utils');
 var log = require('./logger.js');
 
@@ -294,33 +292,75 @@ function handleResponse(syncManager, data) {
 
 function handleError(syncManager, data) {
   var sync = syncManager.sync;
+  var fs = syncManager.fs;
+  var path = data.content && data.content.path;
 
-  function handleForcedDownstream() {}
+  function handleForcedDownstream() {
+    fs.dequeueSync(function(err, syncsLeft, removedPath) {
+      if(err) {
+        log.fatal('Fatal error trying to dequeue sync in handleForcedDownstream');
+        return;
+      }
+
+      syncManager.currentSync = false;
+      sync.onInterrupted(removedPath);
+    });
+  }
+
+  function handleUpstreamError() {
+    fs.delaySync(function(err, delayedPath) {
+      if(err) {
+        log.fatal('Fatal error trying to delay sync in handleUpstreamError');
+        return;
+      }
+
+      syncManager.currentSync = false;
+      sync.onInterrupted(delayedPath);
+    });
+  }
+
+  function handleDownstreamError() {
+    if(syncManager.downstreams && syncManager.downstreams.length) {
+      syncManager.downstreams.splice(syncManager.downstreams.indexOf(path), 1);
+    }
+
+    fs.stopRecording(path);
+    sync.onInterrupted(path);
+  }
 
   if(data.is.content) {
     log.error('Invalid content was sent to the server');
   } else if(data.is.needsDownstream) {
+    log.warn('Cancelling upstream for ' + path + ', downstreaming instead');
     handleForcedDownstream();
   } else if(data.is.impl) {
-    // Delay upstream sync
+    log.error('Server could not initialize upstream sync for ' + path);
+    handleUpstreamError();
   } else if(data.is.interrupted) {
-    // Sync lock was lost, upstream sync was interrupted, delay the upstream sync
+    log.error('Server interrupted upstream sync due to incoming downstream for ' + path);
+    handleUpstreamError();
   } else if(data.is.locked) {
-    // Delay sync
-  } else if(data.is.checksum) {
-    // Delay sync
+    log.error('Server cannot process upstream request due to ' + path + ' being locked');
+    handleUpstreamError();
+  } else if(data.is.checksums) {
+    log.error('Error generating checksums on the server for ' + path);
+    handleUpstreamError();
   } else if(data.is.patch) {
-    // Delay sync
+    log.error('Error patching ' + path + ' on the server');
+    handleUpstreamError();
   } else if(data.is.sourceList) {
-    // Fatal error - could not downstream as sourceList cannot be calculated on the server
+    log.fatal('Fatal error, server could not generate source list');
   } else if(data.is.diffs) {
-    // Remove from downstream queue and stop recording changes to the path
+    log.error('Error generating diffs on the server for ' + path);
+    handleDownstreamError();
   } else if(data.is.downstreamLocked) {
-    // Remove from downstream queue and stop recording changes to the path
+    log.error('Cannot downstream due to lock on ' + path + ' on the server');
+    handleDownstreamError();
   } else if(data.is.verification) {
-    // Remove from downstream queue and stop recording changes to the path
+    log.fatal('Patch could not be verified due to incorrect patching on downstreaming ' + path + '. Possible file corruption.');
+    handleDownstreamError();
   } else {
-    // Unknown error
+    log.fatal(data, 'Unknown error sent by the server');
   }
 }
 
