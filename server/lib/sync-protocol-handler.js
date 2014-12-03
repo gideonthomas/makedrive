@@ -370,7 +370,7 @@ SyncProtocolHandler.prototype.handleChecksumRequest = function(message) {
   rsync.checksums(client.fs, path, sourceList, rsyncOptions, function(err, checksums) {
     if(err) {
       log.error({err: err, client: client}, 'rsync.checksums() error');
-      client.lock.release(path, function(err) {
+      client.lock.release(function(err) {
         if(err) {
           log.error({err: err, client: client}, 'Error releasing sync lock');
         }
@@ -431,7 +431,7 @@ SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
     rsync.patch(client.fs, path, diffs, rsyncOptions, function(err) {
       if(err) {
         log.error({err: err, client: client}, 'rsync.patch() error');
-        client.lock.release(path, function(err) {
+        client.lock.release(function(err) {
           if(err) {
             log.error({err: err, client: client}, 'Error releasing sync lock for ' + path);
           }

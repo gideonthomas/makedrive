@@ -182,38 +182,38 @@ module.exports.publish = function(channel, message) {
   pub.publish(channel, message);
 };
 
-module.exports.del = function(key, callback) {
+module.exports.hdel = function(key, field, callback) {
   if(!store) {
     log.error('Called redis.del() before start()');
     return callback(new Error('Not connected to Redis.'));
   }
 
-  store.del(key, callback);
+  store.hdel(key, field, callback);
 };
 
-module.exports.set = function(key, value, callback) {
+module.exports.hset = function(key, field, value, callback) {
   if(!store) {
     log.error('Called redis.set() before start()');
     return callback(new Error('Not connected to Redis.'));
   }
 
-  store.set(key, value, callback);
+  store.hset(key, field, value, callback);
 };
 
-module.exports.setnx = function(key, value, callback) {
+module.exports.hsetnx = function(key, field, value, callback) {
   if(!store) {
     log.error('Called redis.setnx() before start()');
     return callback(new Error('Not connected to Redis.'));
   }
 
-  store.setnx(key, value, callback);
+  store.hsetnx(key, field, value, callback);
 };
 
-module.exports.get = function(key, callback) {
+module.exports.hget = function(key, field, callback) {
   if(!store) {
     log.error('Called redis.get() before start()');
     return callback(new Error('Not connected to Redis.'));
   }
 
-  store.get(key, callback);
+  store.hget(key, field, callback);
 };
