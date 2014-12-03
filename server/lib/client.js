@@ -6,11 +6,11 @@
  * protocol as normal.
  */
 var SyncProtocolHandler = require('./sync-protocol-handler.js');
-var SyncMessage = require('../../lib/syncmessage.js');
 var EventEmitter = require('events').EventEmitter;
 var ClientInfo = require('./client-info.js');
 var Constants = require('../../lib/constants.js');
 var States = Constants.server.states;
+var syncModes = Constants.syncModes;
 var redis = require('../redis-clients.js');
 var util = require('util');
 var log = require('./logger.js');
@@ -45,7 +45,12 @@ function handleBroadcastMessage(msg, client) {
 
   client.outOfDate = client.outOfDate || [];
   client.currentDownstream = client.currentDownstream || [];
-  client.outOfDate.push({path: msg.path});
+  var outOfDateSync = {path: msg.path};
+  if(msg.oldPath) {
+    outOfDateSync.oldPath = msg.oldPath;
+    outOfDateSync.type = syncModes.RENAME;
+  }
+  client.outOfDate.push(outOfDateSync);
 
   client.handler.syncDownstream();
 }

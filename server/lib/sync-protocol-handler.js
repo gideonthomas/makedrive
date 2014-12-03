@@ -11,6 +11,7 @@ var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 var ServerStates = Constants.server.states;
 var rsyncOptions = Constants.rsyncDefaults;
 var States = Constants.server.states;
+var syncModes = Constants.syncModes;
 
 var env = require('./environment.js');
 var MAX_SYNC_SIZE_BYTES = env.get('MAX_SYNC_SIZE_BYTES') || Math.Infinity;
@@ -159,6 +160,21 @@ function generateSourceListResponse(client, path, callback) {
 
 function sendSourceList(client, syncInfo) {
   var syncInfoCopy = {};
+  var response;
+
+  if(syncInfo.type === syncModes.RENAME) {
+    // Make a copy so that we don't store the sync times in the
+    // list of paths that need to be eventually synced
+    Object.keys(syncInfo).forEach(function(key) {
+      syncInfoCopy[key] = syncInfo[key];
+    });
+
+    syncInfoCopy._syncStarted = Date.now();
+    client.currentDownstream.push(syncInfoCopy);
+    response = SyncMessage.request.rename;
+    response.content = {path: syncInfo.path, oldPath: syncInfo.oldPath};
+    return client.sendMessage(response);
+  }
 
   generateSourceListResponse(client, syncInfo.path, function(err, response) {
     if(!err) {
@@ -246,6 +262,10 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
     this.handleChecksumRequest(message);
   } else if(message.is.delay) {
     this.handleDelayRequest(message);
+  } else if(message.is.rename) {
+    this.handleRenameRequest(message);
+  } else if(message.is.del) {
+    this.handleDeleteRequest(message);
   } else {
     log.warn({syncMessage: message, client: client}, 'Client sent unknown request');
   }
@@ -276,6 +296,7 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
   var response;
   var path;
   var type;
+  var comparePath;
 
   if(!client) {
     return;
@@ -289,26 +310,27 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
 
   path = message.content.path;
   type = message.content.type;
+  comparePath = type === syncModes.RENAME ? message.content.oldPath : path;
 
   // The client has not downstreamed the file for which an upstream
   // sync was requested.
-  if(findPathIndexinArray(client.outOfDate, path)) {
-    log.debug({client: client}, 'Upstream sync declined as downstream is required for ' + path);
+  if(findPathIndexinArray(client.outOfDate, comparePath)) {
+    log.debug({client: client}, 'Upstream sync declined as downstream is required for ' + comparePath);
     response = SyncMessage.error.needsDownstream;
-    response.content = {path: path, type: type};
+    response.content = {path: comparePath, type: type};
     client.sendMessage(response);
     // Force the client to downstream that path
-    return sendSourceList(client, {path: path});
+    return sendSourceList(client, {path: comparePath});
   }
 
-  SyncLock.request(client, path, function(err, lock) {
+  SyncLock.request(client, comparePath, function(err, lock) {
     if(err) {
       log.error({err: err, client: client}, 'SyncLock.request() error');
       response = SyncMessage.error.impl;
       response.content = {path: path, type: type};
     } else {
       if(lock) {
-        log.debug({client: client, syncLock: lock}, 'Lock request successful, lock acquired for ' + path);
+        log.debug({client: client, syncLock: lock}, 'Lock request successful, lock acquired for ' + comparePath);
 
         lock.once('unlocked', function() {
           log.debug({client: client, syncLock: lock}, 'Lock unlocked for ' + lock.path);
@@ -326,8 +348,13 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
 
         response = SyncMessage.response.sync;
         response.content = {path: path, type: type};
+
+        if(type === syncModes.RENAME) {
+          client.upstreamSync.oldPath = comparePath;
+          response.content.oldPath = comparePath;
+        }
       } else {
-        log.debug({client: client}, 'Lock request unsuccessful, lock denied for ' + path);
+        log.debug({client: client}, 'Lock request unsuccessful, lock denied for ' + comparePath);
         response = SyncMessage.error.locked;
         response.content = {error: 'Sync already in progress', path: path, type: type};
       }
@@ -335,6 +362,66 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
 
     client.sendMessage(response);
   });
+};
+
+SyncProtocolHandler.prototype.handleRenameRequest = function(message) {
+  var client = ensureClient(this.client);
+  var response;
+  var path;
+  var oldPath;
+  var sync = this;
+
+  if(!client) {
+    return;
+  }
+
+  if(message.invalidContent(['oldPath'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing path or old path expected by handleRenameRequest()');
+    response = SyncMessage.error.content;
+    return client.sendMessage(response);
+  }
+
+  path = message.content.path;
+  oldPath = message.content.oldPath;
+
+  if(!ensureLock(client, oldPath)) {
+    return;
+  }
+
+  // Called when the client is closable again
+  function closable() {
+    client.closable = true;
+    sync.emit('closable');
+  }
+
+  client.closable = false;
+
+  rsync.utils.rename(client.fs, oldPath, path, function(err) {
+    if(err) {
+      log.error({err: err, client: client}, 'rsync.utils.rename() error when renaming ' + oldPath + ' to ' + path);
+      client.lock.release(function(err) {
+        if(err) {
+          log.error({err: err, client: client}, 'Error releasing sync lock');
+        }
+
+        releaseLock(client);
+
+        response = SyncMessage.error.rename;
+        response.content = {path: path, oldPath: oldPath};
+        client.sendMessage(response);
+        closable();
+      });
+    } else {
+      response = SyncMessage.response.patch;
+      response.content = {path: path, oldPath: oldPath};
+      sync.end(response);
+      closable();
+    }
+  });
+};
+
+SyncProtocolHandler.prototype.handleDeleteRequest = function(message) {
+
 };
 
 SyncProtocolHandler.prototype.handleChecksumRequest = function(message) {
@@ -487,7 +574,7 @@ SyncProtocolHandler.prototype.end = function(patchResponse) {
 
     // Also let all other connected clients for this uesr know that
     // they are now out of date, and need to do a downstream sync.
-    self.broadcastUpdate(path);
+    self.broadcastUpdate(path, patchResponse.content.oldPath);
   });
 };
 
@@ -495,7 +582,7 @@ SyncProtocolHandler.prototype.end = function(patchResponse) {
 // other than the active sync client after an upstream sync process has completed.
 // Also, if any downstream syncs were interrupted during this upstream sync,
 // they will be retriggered when the message is received.
-SyncProtocolHandler.prototype.broadcastUpdate = function(path) {
+SyncProtocolHandler.prototype.broadcastUpdate = function(path, oldPath) {
   var client = ensureClient(this.client);
   if(!client) {
     return;
@@ -510,6 +597,9 @@ SyncProtocolHandler.prototype.broadcastUpdate = function(path) {
     id: client.id,
     path: path
   };
+  if(oldPath) {
+    msg.oldPath = oldPath;
+  }
 
   log.debug({client: client, syncMessage: msg}, 'Broadcasting out-of-date');
   redis.publish(Constants.server.syncChannel, JSON.stringify(msg));

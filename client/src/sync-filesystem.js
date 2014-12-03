@@ -305,6 +305,9 @@ function SyncFileSystem(fs) {
             path: pathOrFD,
             type: mode
           };
+          if(mode === syncModes.RENAME) {
+            syncPath.oldPath = args[pathArgPos - 1];
+          }
           var indexInPathsToSync;
 
           if(err) {

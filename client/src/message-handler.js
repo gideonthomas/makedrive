@@ -2,6 +2,7 @@ var SyncMessage = require('../../lib/syncmessage');
 var rsync = require('../../lib/rsync');
 var rsyncUtils = rsync.utils;
 var rsyncOptions = require('../../lib/constants').rsyncDefaults;
+var syncModes = require('../../lib/constants').syncModes;
 var serializeDiff = require('../../lib/diff').serialize;
 var deserializeDiff = require('../../lib/diff').deserialize;
 var steps = require('./sync-steps');
@@ -50,6 +51,7 @@ function sendChecksums(syncManager, path, sourceList) {
 function handleRequest(syncManager, data) {
   var fs = syncManager.fs;
   var rawFs = syncManager.rawFs;
+  var sync = syncManager.sync;
 
   function handleChecksumRequest() {
     if(data.invalidContent(['sourceList'])) {
@@ -100,6 +102,52 @@ function handleRequest(syncManager, data) {
     });
   }
 
+  function handleRenameRequest() {
+    if(data.invalidContent(['oldPath'])) {
+      log.error('Path or old path not sent by server in handleRenameRequest.', data);
+      return onError(syncManager, new Error('Server sent insufficient content'));
+    }
+
+    var path = data.content.path;
+    var oldPath = data.content.path;
+    var message;
+
+    // If the server requests to downstream a path that is not in the
+    // root, ignore the downstream.
+    if(path.indexOf(fs.root) !== 0) {
+      message = SyncMessage.response.root;
+      message.content = {path: path};
+      log.info('Ignoring downstream sync for ' + path);
+      return syncManager.send(message.stringify());
+    }
+
+    syncManager.downstreams.push(path);
+    sync.onSyncing(oldPath);
+
+    rsyncUtils.rename(fs, oldPath, path, function(err) {
+      if(err) {
+        log.error('Failed to rename ' + oldPath + ' to ' + path + ' during downstream sync', err);
+        message = SyncMessage.request.delay;
+        message.content = {path: path};
+        syncManager.send(message.stringify());
+        return onError(syncManager, err);
+      }
+
+      rsyncUtils.generateChecksums(fs, [path], true, function(err, checksums) {
+        if(err) {
+          log.error('Failed to generate checksums for ' + path + ' during downstream rename', err);
+          message = SyncMessage.request.delay;
+          message.content = {path: path};
+          syncManager.send(message.stringify());
+          return onError(syncManager, err);
+        }
+
+        message = SyncMessage.response.patch;
+        message.content = {path: path, checksums: checksums};
+        syncManager.send(message.stringify());
+      });
+    });
+  }
 
   if(data.is.checksums) {
     // DOWNSTREAM - CHKSUM
@@ -107,6 +155,9 @@ function handleRequest(syncManager, data) {
   } else if(data.is.diffs) {
     // UPSTREAM - DIFFS
     handleDiffRequest();
+  } else if(data.is.rename) {
+    // DOWNSTREAM - RENAME
+    handleRenameRequest();
   } else {
     onError(syncManager, new Error('Failed to sync with the server.'));
   }
@@ -132,9 +183,23 @@ function handleResponse(syncManager, data) {
       });
     }
 
+    var message;
     var path = data.content.path;
+    var type = data.content.type;
 
     sync.onSyncing(path);
+
+    if(type === syncModes.RENAME) {
+      message = SyncMessage.request.rename;
+      message.content = {path: path, oldPath: data.content.oldPath};
+      return syncManager.send(message.stringify());
+    }
+
+    if(type === syncModes.DELETE) {
+      message = SyncMessage.request.del;
+      message.content = {path: path};
+      return syncManager.send(message.stringify());
+    }
 
     rsync.sourceList(rawFs, path, rsyncOptions, function(err, sourceList) {
       if(err){
@@ -151,7 +216,7 @@ function handleResponse(syncManager, data) {
         });
       }
 
-      var message = SyncMessage.request.checksum;
+      message = SyncMessage.request.checksum;
       message.content = {path: path, type: data.content.type, sourceList: sourceList};
       syncManager.send(message.stringify());
     });

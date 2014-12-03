@@ -188,9 +188,12 @@ SyncManager.prototype.syncUpstream = function() {
         return;
       }
 
-      manager.currentSync = true;
+      manager.currentSync = syncInfo;
       syncRequest = SyncMessage.request.sync;
       syncRequest.content = {path: syncInfo.path, type: syncInfo.type};
+      if(syncInfo.oldPath) {
+        syncRequest.content.oldPath = syncInfo.oldPath;
+      }
       manager.send(syncRequest.stringify());
     });
   });
