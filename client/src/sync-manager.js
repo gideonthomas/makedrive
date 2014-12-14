@@ -1,6 +1,5 @@
 var SyncMessage = require( '../../lib/syncmessage' ),
     messageHandler = require('./message-handler'),
-    steps = require('./sync-steps'),
     WS = require('ws'),
     request = require('request'),
     url = require('url');
@@ -17,7 +16,6 @@ function SyncManager(sync, fs, _fs) {
 
 SyncManager.prototype.init = function(wsUrl, token, options, callback) {
   var manager = this;
-  var session = manager.session;
   var sync = manager.sync;
   var reconnectCounter = 0;
   var socket;
@@ -33,8 +31,6 @@ SyncManager.prototype.init = function(wsUrl, token, options, callback) {
     }
 
     if(data.is.response && data.is.authz) {
-      session.step = steps.SYNCED;
-
       socket.onmessage = function(event) {
         var data = event.data || event;
         messageHandler(manager, data);
