@@ -61,7 +61,7 @@ function SyncFileSystem(fs) {
     }
 
     paths = paths.filter(function(path) {
-      return !!(path.indexOf(root) === 0);
+      return path.indexOf(root) === 0;
     });
 
     fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
@@ -177,7 +177,7 @@ function SyncFileSystem(fs) {
         path = pathOrObj.path || '';
       }
 
-      return !!(path.indexOf(newRoot) === 0);
+      return path.indexOf(newRoot) === 0;
     }
 
     fs.lstat(newRoot, function(err, stats) {

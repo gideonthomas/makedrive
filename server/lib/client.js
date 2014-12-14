@@ -45,10 +45,9 @@ function handleBroadcastMessage(msg, client) {
 
   client.outOfDate = client.outOfDate || [];
   client.currentDownstream = client.currentDownstream || [];
-  var outOfDateSync = {path: msg.path};
-  if(msg.oldPath) {
+  var outOfDateSync = {path: msg.path, type: msg.type};
+  if(msg.type === syncModes.RENAME) {
     outOfDateSync.oldPath = msg.oldPath;
-    outOfDateSync.type = syncModes.RENAME;
   }
   client.outOfDate.push(outOfDateSync);
 
