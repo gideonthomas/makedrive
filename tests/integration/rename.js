@@ -50,10 +50,10 @@ describe('MakeDrive Client - file rename integration', function(){
   /**
    * This test creates 2 simultaneous clients for the same user, and simulates
    * a situation where a file is renamed by one client. It then makes sure that
-   * this renamed file is sync'ed to the other client.
+   * this renamed file is synced to the other client.
    */
   it('should handle file renames in downstream and upstream syncs', function(done) {
-    client2.sync.once('completed', function() {
+    client2.sync.once('synced', function() {
       // Make sure we have a confliced copy now + the new file.
       client2.fs.readdir('/dir1', function(err, entries) {
         if(err) throw err;
@@ -72,5 +72,4 @@ describe('MakeDrive Client - file rename integration', function(){
       client1.sync.request();
     });
   });
-
 });

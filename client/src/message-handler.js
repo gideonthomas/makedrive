@@ -5,13 +5,11 @@ var rsyncOptions = require('../../lib/constants').rsyncDefaults;
 var syncModes = require('../../lib/constants').syncModes;
 var serializeDiff = require('../../lib/diff').serialize;
 var deserializeDiff = require('../../lib/diff').deserialize;
-var steps = require('./sync-steps');
 var fsUtils = require('../../lib/fs-utils');
 var log = require('./logger.js');
 var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 
 function onError(syncManager, err) {
-  syncManager.session.step = steps.FAILED;
   syncManager.sync.onError(err);
 }
 
@@ -113,7 +111,7 @@ function handleRequest(syncManager, data) {
     }
 
     var path = data.content.path;
-    var oldPath = data.content.path;
+    var oldPath = data.content.oldPath;
     var type = data.content.type;
     var message;
 

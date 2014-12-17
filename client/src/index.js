@@ -317,7 +317,7 @@ function createFS(options) {
 
               syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
 
-              sync.emit('completed', 'Sync completed for ' + path);
+              sync.emit('completed', path);
               log.info('Sync completed for ' + path);
 
               if(!syncsLeft.length) {

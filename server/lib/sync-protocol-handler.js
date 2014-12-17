@@ -406,7 +406,7 @@ SyncProtocolHandler.prototype.handleRenameRequest = function(message) {
 
   path = message.content.path;
   oldPath = message.content.oldPath;
-  type = type;
+  type = message.content.type;
 
   if(!ensureLock(client, oldPath)) {
     return;

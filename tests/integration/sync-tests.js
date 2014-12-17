@@ -44,26 +44,34 @@ describe('Two clients', function(){
           // Step 2: Second client has connected
           sync2.once('connected', function onClient2Connected() {
             // Step 3: First client has completed upstream sync #1
-            sync1.once('completed', function onClient1Upstream1() {
+            sync1.once('synced', function onClient1Upstream1() {
               util.ensureRemoteFilesystem(file1, result1.jar, function(err) {
                 expect(err).not.to.exist;
               });
             });
 
             // Step 4: Second client has pulled down first client's upstream patch #1
-            sync2.once('completed', function onClient2Downstream1() {
+            sync2.on('completed', function onClient2Downstream1(path) {
+              // Only continue if the sync was completed for
+              // /dir/file1.txt, i.e. not /dir which will occur first
+              if(path !== '/dir/file1.txt') {
+                return;
+              }
+
+              sync2.removeListener('completed', onClient2Downstream1);
+
               util.ensureFilesystem(fs2, file1, function(err) {
                 expect(err).not.to.exist;
 
                 // Step 5: First client has completed upstream sync #2
-                sync1.once('completed', function onClient1Upstream2() {
+                sync1.once('synced', function onClient1Upstream2() {
                   util.ensureRemoteFilesystem(finalLayout, result1.jar, function(err) {
                     expect(err).not.to.exist;
                   });
                 });
 
                 // Step 6: Second client has pulled down first client's upstream patch #2
-                sync2.once('completed', function onClient2Downstream2() {
+                sync2.once('synced', function onClient2Downstream2() {
                   util.ensureFilesystem(fs2, finalLayout, function(err) {
                     expect(err).not.to.exist;
 
