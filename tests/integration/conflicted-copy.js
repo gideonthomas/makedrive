@@ -299,14 +299,12 @@ describe('MakeDrive Client - conflicted copy integration', function(){
           client2.sync.once('synced', function() {
             util.ensureFilesystem(client2.fs, layout2, function(err) {
               expect(err).not.to.exist;
-            });
-          });
 
-          client1.sync.once('synced', function() {
-            util.ensureFilesystem(client1.fs, layout1, function(err) {
-              expect(err).not.to.exist;
+              util.ensureFilesystem(client1.fs, layout1, function(err) {
+                expect(err).not.to.exist;
 
-              done();
+                done();
+              });
             });
           });
 
