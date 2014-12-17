@@ -79,6 +79,7 @@ function Client(ws) {
   self.closable = true;
   // We start using this in client-manager.js when a client is fully authenticated.
   self.handler = new SyncProtocolHandler(self);
+  self.outOfDate = [];
 
   ws.onerror = function(err) {
     log.error({err: err, client: self}, 'Web Socket error');
@@ -214,7 +215,8 @@ Client.prototype.sendMessage = function(syncMessage) {
 
 Client.prototype.delaySync = function(path) {
   var self = this;
-  var delayedSync = self.currentDownstream.splice(findPathIndexinArray(self.currentDownstream, path), 1);
+  var indexInCurrent = findPathIndexinArray(self.currentDownstream, path);
+  var delayedSync = indexInCurrent === -1 ? null : self.currentDownstream.splice(indexInCurrent, 1);
   var syncTime;
 
   if(delayedSync) {
@@ -232,7 +234,7 @@ Client.prototype.endDownstream = function(path) {
   var syncEnded;
   var syncTime;
 
-  if(!indexInCurrent) {
+  if(indexInCurrent === -1) {
     log.warn({client: self}, 'Sync entry not found in current downstreams when attempting to end sync for ' + path);
   } else {
     syncEnded = self.currentDownstream.splice(indexInCurrent, 1);
@@ -240,7 +242,7 @@ Client.prototype.endDownstream = function(path) {
 
   syncTime = syncEnded ? Date.now() - syncEnded._syncStarted : 0;
 
-  if(!indexInOutOfDate) {
+  if(indexInOutOfDate === -1) {
     log.warn({client: self}, 'Sync entry not found in out of date list when attempting to end sync for ' + path);
     return;
   }

@@ -40,7 +40,7 @@ function handleLockRequest(message, lock) {
 
   // Otherwise, give up the lock by overwriting the value with the
   // requesting client's ID (replacing ours), and respond that we've released it.
-  redis.set(lock.key, lock.path, message.id, function(err, reply) {
+  redis.hset(lock.key, lock.path, message.id, function(err, reply) {
     if(err) {
       log.error({err: err, syncLock: lock}, 'Error setting redis lock key.');
       return;
@@ -105,7 +105,7 @@ SyncLock.prototype.release = function(callback) {
   lock._handleLockRequestFn = null;
 
   // Try to delete the lock in redis
-  redis.del(key, path, function(err, reply) {
+  redis.hdel(key, path, function(err, reply) {
     // NOTE: we don't emit the unlocked event here, but use the callback instead.
     // The unlocked event indicates that the lock was released without calling release().
     lock.unlocked = true;
@@ -185,7 +185,7 @@ function request(client, path, callback) {
       redis.removeListener('lock-response', client._handleLockResponseFn);
       client._handleLockResponseFn = null;
 
-      redis.set(key, path, id, function(err, reply) {
+      redis.hset(key, path, id, function(err, reply) {
         if(err) {
           log.error({err: err, client: client}, 'Error setting redis lock key.');
           return callback(err);
@@ -220,7 +220,7 @@ function request(client, path, callback) {
  */
 function isUserLocked(username, path, callback) {
   var key = SyncLock.generateKey(username);
-  redis.get(key, path, function(err, value) {
+  redis.hget(key, path, function(err, value) {
     if(err) {
       log.error(err, 'Error getting redis lock key %s.', key);
       return callback(err);

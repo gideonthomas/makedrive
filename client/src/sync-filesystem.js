@@ -123,8 +123,8 @@ function SyncFileSystem(fs) {
         return callback();
       }
 
-      var delayedPath = pathsToSync.toSync.shift();
-      pathsToSync.toSync.push(delayedPath);
+      var delayedSync = pathsToSync.toSync.shift();
+      pathsToSync.toSync.push(delayedSync);
       delete pathsToSync.modified;
 
       fsUtils.setPathsToSync(fs, root, pathsToSync, function(err) {
@@ -132,7 +132,7 @@ function SyncFileSystem(fs) {
           return callback(err);
         }
 
-        callback(null, delayedPath);
+        callback(null, delayedSync.path);
       });
     });
   };
@@ -148,7 +148,7 @@ function SyncFileSystem(fs) {
         return callback();
       }
 
-      var removedPath = pathsToSync.toSync.shift();
+      var removedSync = pathsToSync.toSync.shift();
       if(!pathsToSync.toSync.length) {
         delete pathsToSync.toSync;
       }
@@ -159,7 +159,7 @@ function SyncFileSystem(fs) {
           return callback(err);
         }
 
-        callback(null, pathsToSync.toSync, removedPath);
+        callback(null, pathsToSync.toSync, removedSync.path);
       });
     });
   };
@@ -322,7 +322,7 @@ function SyncFileSystem(fs) {
             // If at the top of pathsToSync, the path is
             // currently syncing so change the modified path
             pathsToSync.modified = pathOrFD;
-          } else if(!indexInPathsToSync) {
+          } else if(indexInPathsToSync === -1) {
             pathsToSync.toSync.push(syncPath);
           }
 
@@ -349,7 +349,7 @@ function SyncFileSystem(fs) {
     self[method] = wrapMethod(method, 1, setUnsynced, syncModes.CREATE);
   });
 
-  // Wrapped fs methods that have path at second arg position, and need to use the parent path.
+  // Wrapped fs methods that have path at second arg position
   ['rename'].forEach(function(method) {
     self[method] = wrapMethod(method, 1, setUnsynced, syncModes.RENAME);
   });
@@ -359,8 +359,7 @@ function SyncFileSystem(fs) {
     self[method] = wrapMethod(method, 0, fsetUnsynced, syncModes.CREATE);
   });
 
-  // Wrapped fs methods that have path at first arg position and use parent
-  // path for writing unsynced metadata (i.e., removes node)
+  // Wrapped fs methods that have path at first arg position
   ['rmdir', 'unlink'].forEach(function(method) {
     self[method] = wrapMethod(method, 0, setUnsynced, syncModes.DELETE);
   });
@@ -380,11 +379,37 @@ function SyncFileSystem(fs) {
           return callback(err);
         }
 
-        if(conflicted) {
-          conflict.removeFileConflict(fs, newPath, callback);
-        } else {
-          callback();
+        if(!conflicted) {
+          return callback();
         }
+
+        conflict.removeFileConflict(fs, newPath, function(err) {
+          if(err) {
+            return callback(err);
+          }
+
+          fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
+            var indexInPathsToSync;
+            var syncInfo;
+
+            if(err) {
+              return callback(err);
+            }
+
+            indexInPathsToSync = findPathIndexinArray(pathsToSync.toSync, newPath);
+
+            if(indexInPathsToSync === -1) {
+              return;
+            }
+
+            syncInfo = pathsToSync.toSync[indexInPathsToSync];
+            syncInfo.type = syncModes.CREATE;
+            delete syncInfo.oldPath;
+            pathsToSync.toSync[indexInPathsToSync] = syncInfo;
+
+            fsUtils.setPathsToSync(fs, root, pathsToSync, callback);
+          });
+        });
       });
     });
   };

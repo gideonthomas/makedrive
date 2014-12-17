@@ -49,16 +49,21 @@ describe('MakeDrive Client - conflicted copy integration', function(){
         if(err) throw err;
 
         client1 = client;
-        util.setupSyncClient({username: username, manual: true}, function(err, client) {
+
+        util.ensureRemoteFilesystem(layout, client.jar, function(err) {
           if(err) throw err;
 
-          client2 = client;
-
-          // Make sure the initial downstream sync produced the same layout as client1
-          util.ensureFilesystem(client2.fs, layout, function(err) {
+          util.setupSyncClient({username: username, manual: true}, function(err, client) {
             if(err) throw err;
 
-            modifyClients(done);
+            client2 = client;
+
+            // Make sure the initial downstream sync produced the same layout as client1
+            util.ensureFilesystem(client2.fs, layout, function(err) {
+              if(err) throw err;
+
+              modifyClients(done);
+            });
           });
         });
       });
@@ -87,7 +92,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
    * this conflicted copy is created, and that it is not synced back to the server.
    */
   it('should handle conflicted copy in downstream and upstream syncs', function(done) {
-    client2.sync.once('completed', function() {
+    client2.sync.once('synced', function() {
       // Make sure we have a confliced copy now + the new file.
       client2.fs.readdir('/dir1', function(err, entries) {
         if(err) throw err;
@@ -114,7 +119,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
             client2.fs.writeFile('/dir1/file2', 'contents of file2', function(err) {
               if(err) throw err;
 
-              client2.sync.once('completed', function() {
+              client2.sync.once('synced', function() {
                 // Our server's filesystem should now look like this:
                 var newLayout = {
                   // NOTE: /dir1/file1 should have client1's changes, not client2's,
@@ -149,7 +154,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
    * also doesn't sync.
    */
   it('should not sync conflicted copy when modified (i.e., not rename)', function(done) {
-    client2.sync.once('completed', function() {
+    client2.sync.once('synced', function() {
       // Make sure we have a confliced copy now + the new file.
       client2.fs.readdir('/dir1', function(err, entries) {
         if(err) throw err;
@@ -180,7 +185,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
               client2.fs.writeFile('/dir1/file2', 'contents of file2', function(err) {
                 if(err) throw err;
 
-                client2.sync.once('completed', function() {
+                client2.sync.once('synced', function() {
                   // Our server's filesystem should now look like this:
                   var newLayout = {
                     // NOTE: /dir1/file1 should have client1's changes, not client2's,
@@ -213,57 +218,53 @@ describe('MakeDrive Client - conflicted copy integration', function(){
    * clear the conflict, then does a sync back to the server, checking that it synced.
    */
   it('should handle a rename to a conflicted copy in downstream and upstream syncs', function(done) {
-    // Wait for client1 changes to sync to server
-    client1.sync.once('completed', function() {
+    client2.sync.once('synced', function() {
+      // Make sure we have a confliced copy now + the new file.
+      client2.fs.readdir('/dir1', function(err, entries) {
+        if(err) throw err;
+        expect(entries.length).to.equal(2);
+        expect(entries).to.include('file1');
 
-      client2.sync.once('completed', function() {
-        // Make sure we have a confliced copy now + the new file.
-        client2.fs.readdir('/dir1', function(err, entries) {
+        // Make sure this is a real conflicted copy, both in name
+        // and also in terms of attributes on the file.
+        var conflictedCopyFilename = findConflictedFilename(entries);
+        expect(conflict.filenameContainsConflicted(conflictedCopyFilename)).to.be.true;
+        conflict.isConflictedCopy(client2.fs, conflictedCopyFilename, function(err, conflicted) {
           if(err) throw err;
-          expect(entries.length).to.equal(2);
-          expect(entries).to.include('file1');
+          expect(conflicted).to.be.true;
 
-          // Make sure this is a real conflicted copy, both in name
-          // and also in terms of attributes on the file.
-          var conflictedCopyFilename = findConflictedFilename(entries);
-          expect(conflict.filenameContainsConflicted(conflictedCopyFilename)).to.be.true;
-          conflict.isConflictedCopy(client2.fs, conflictedCopyFilename, function(err, conflicted) {
+          // Make sure the conflicted copy has the changes we expect
+          client2.fs.readFile(conflictedCopyFilename, 'utf8', function(err, data) {
             if(err) throw err;
-            expect(conflicted).to.be.true;
 
-            // Make sure the conflicted copy has the changes we expect
-            client2.fs.readFile(conflictedCopyFilename, 'utf8', function(err, data) {
+            // Should have client2's modifications
+            expect(data).to.equal('data+2');
+
+            // Rename the conflicted file and re-sync with server, making
+            // sure that the file gets sent this time.
+            client2.fs.rename(conflictedCopyFilename, '/dir1/resolved', function(err) {
               if(err) throw err;
 
-              // Should have client2's modifications
-              expect(data).to.equal('data+2');
-
-              // Rename the conflicted file and re-sync with server, making
-              // sure that the file gets sent this time.
-              client2.fs.rename(conflictedCopyFilename, '/dir1/resolved', function(err) {
+              // Make sure the rename removed the conflict
+              conflict.isConflictedCopy(client2.fs, '/dir1/resolved', function(err, conflicted) {
                 if(err) throw err;
+                expect(conflicted).to.be.false;
 
-                // Make sure the rename removed the conflict
-                conflict.isConflictedCopy(client2.fs, '/dir1/resolved', function(err, conflicted) {
-                  if(err) throw err;
-                  expect(conflicted).to.be.false;
+                client2.sync.once('synced', function() {
+                  // Our server's filesystem should now look like this:
+                  var newLayout = {
+                    // NOTE: /dir1/resolved should have client2's changes, not client1's.
+                    '/dir1/file1': 'data+1',
+                    '/dir1/resolved': 'data+2'
+                  };
 
-                  client2.sync.once('completed', function() {
-                    // Our server's filesystem should now look like this:
-                    var newLayout = {
-                      // NOTE: /dir1/resolved should have client2's changes, not client1's.
-                      '/dir1/file1': 'data+1',
-                      '/dir1/resolved': 'data+2'
-                    };
-
-                    util.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
-                      expect(err).not.to.exist;
-                      done();
-                    });
+                  util.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
+                    expect(err).not.to.exist;
+                    done();
                   });
-
-                  client2.sync.request();
                 });
+
+                client2.sync.request();
               });
             });
           });
@@ -279,39 +280,37 @@ describe('MakeDrive Client - conflicted copy integration', function(){
     var layout1 = {'/dir1/file1': layout['/dir1/file1'] + '+1'};
     var layout2 = {'/dir1/file1': layout1['/dir1/file1']};
 
-    client1.sync.once('completed', function() {
-      client2.sync.once('completed', function() {
-        client2.fs.readdir('/dir1', function(err, entries) {
+    client2.sync.once('synced', function() {
+      client2.fs.readdir('/dir1', function(err, entries) {
+        if(err) throw err;
+        expect(entries.length).to.equal(2);
+        expect(entries).to.include('file1');
+
+        // Make sure this is a real conflicted copy, both in name
+        // and also in terms of attributes on the file.
+        var conflictedCopyFilename = findConflictedFilename(entries);
+        expect(conflict.filenameContainsConflicted(conflictedCopyFilename)).to.be.true;
+        // Add the conflicted copy to the layout
+        layout2[conflictedCopyFilename] = 'Changed Data';
+
+        client2.fs.writeFile(conflictedCopyFilename, layout2[conflictedCopyFilename], function(err) {
           if(err) throw err;
-          expect(entries.length).to.equal(2);
-          expect(entries).to.include('file1');
 
-          // Make sure this is a real conflicted copy, both in name
-          // and also in terms of attributes on the file.
-          var conflictedCopyFilename = findConflictedFilename(entries);
-          expect(conflict.filenameContainsConflicted(conflictedCopyFilename)).to.be.true;
-          // Add the conflicted copy to the layout
-          layout2[conflictedCopyFilename] = 'Changed Data';
-
-          client2.fs.writeFile(conflictedCopyFilename, layout2[conflictedCopyFilename], function(err) {
-            if(err) throw err;
-
-            client2.sync.once('completed', function() {
-              util.ensureFilesystem(client2.fs, layout2, function(err) {
-                expect(err).not.to.exist;
-              });
+          client2.sync.once('synced', function() {
+            util.ensureFilesystem(client2.fs, layout2, function(err) {
+              expect(err).not.to.exist;
             });
-
-            client1.sync.once('completed', function() {
-              util.ensureFilesystem(client1.fs, layout1, function(err) {
-                expect(err).not.to.exist;
-
-                done();
-              });
-            });
-
-            client2.sync.request();
           });
+
+          client1.sync.once('synced', function() {
+            util.ensureFilesystem(client1.fs, layout1, function(err) {
+              expect(err).not.to.exist;
+
+              done();
+            });
+          });
+
+          client2.sync.request();
         });
       });
     });

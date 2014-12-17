@@ -2,7 +2,8 @@ var SyncMessage = require( '../../lib/syncmessage' ),
     messageHandler = require('./message-handler'),
     WS = require('ws'),
     request = require('request'),
-    url = require('url');
+    url = require('url'),
+    log = require('./logger.js');
 
 function SyncManager(sync, fs, _fs) {
   var manager = this;
@@ -172,7 +173,7 @@ SyncManager.prototype.syncUpstream = function() {
     }
 
     if(!pathsToSync || !pathsToSync.length) {
-      sync.onError(new Error('Nothing to sync'));
+      log.warn('Nothing to sync');
       return;
     }
 

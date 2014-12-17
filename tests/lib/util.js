@@ -654,7 +654,7 @@ function prepareUpstreamSync(finalStep, username, token, cb){
 
 function createFilesystemLayout(fs, layout, callback) {
   var paths = Object.keys(layout);
-  var sh = fs.Shell();
+  var sh = new fs.Shell();
 
   function createPath(path, callback) {
     var contents = layout[path];
@@ -693,7 +693,7 @@ function deleteFilesystemLayout(fs, paths, callback) {
       deleteFilesystemLayout(fs, entries, callback);
     });
   } else {
-    var sh = fs.Shell();
+    var sh = new fs.Shell();
     var rm = function(path, callback) {
       sh.rm(path, {recursive: true}, callback);
     };
@@ -731,13 +731,13 @@ function ensureFilesystemLayout(fs, layout, callback) {
       return callback(err);
     }
 
-    var sh = fs.Shell();
+    var sh = new fs.Shell();
     sh.ls('/', {recursive: true}, function(err, fsListing) {
       if(err) {
         return callback(err);
       }
 
-      var sh2 = fs2.Shell();
+      var sh2 = new fs2.Shell();
       sh2.ls('/', {recursive: true}, function(err, fs2Listing) {
         if(err) {
           return callback(err);
@@ -767,7 +767,7 @@ function ensureRemoteFilesystemLayout(layout, jar, callback) {
       return callback(err);
     }
 
-    var sh = layoutFS.Shell();
+    var sh = new layoutFS.Shell();
     sh.ls('/', {recursive: true}, function(err, layoutFSListing) {
       if(err) {
         return callback(err);
@@ -958,20 +958,22 @@ function setupSyncClient(options, callback) {
     };
 
     sync.once('connected', function onConnected() {
-      if(options.layout) {
-        sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted(message) {
+        if(message === 'MakeDrive has been synced') {
           callback(null, client);
-        });
+        }
+      });
 
-        createFilesystemLayout(fs, options.layout, function(err) {
-          if(err) {
-            return callback(err);
-          }
-          sync.request();
-        });
-      } else {
-        callback(null, client);
+      if(!options.layout) {
+        return;
       }
+
+      createFilesystemLayout(fs, options.layout, function(err) {
+        if(err) {
+          return callback(err);
+        }
+        sync.request();
+      });
     });
 
     sync.once('error', function(err) {

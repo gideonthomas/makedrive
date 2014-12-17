@@ -58,24 +58,31 @@ function ensureClient(client) {
 
 // TODO: Fix with Dave's impl of Shell().find()
 function getListOfSyncs(fs, callback) {
-  fs.Shell().find('/', function(err, list) {
+  var syncList = [];
+  var sh = new fs.Shell();
+
+  function trimTrailingSlash(path, next) {
+    if(path === '/') {
+      return next();
+    }
+
+    if(path.charAt(path.length - 1) === '/') {
+      path = path.substring(0, path.length - 1);
+    }
+
+    syncList.push({path: path, type: syncModes.CREATE});
+    next();
+  }
+
+  sh.find('/', {exec: trimTrailingSlash}, function(err) {
     if(err) {
       return callback(err);
     }
-
-    if(!list) {
-      return callback();
-    }
-
-    list = list.entries;
-
     // Needs to be optimized as this array contains redundant syncs
     // For e.g. the array will contain [{path: '/dir'}, {path: '/dir/file'}]
     // In this case, the '/dir' entry can be removed because the sync for
     // '/dir/file' will create '/dir'
-    return list.map(function(entry) {
-      return {path: entry.path};
-    });
+    callback(null, syncList);
   });
 }
 
@@ -273,7 +280,7 @@ SyncProtocolHandler.prototype.handleRequest = function(message) {
     this.handleDiffRequest(message);
   } else if(message.is.sync) {
     this.handleSyncInitRequest(message);
-  } else if(message.is.checksum) {
+  } else if(message.is.checksums) {
     this.handleChecksumRequest(message);
   } else if(message.is.delay) {
     this.handleDelayRequest(message);
@@ -329,7 +336,7 @@ SyncProtocolHandler.prototype.handleSyncInitRequest = function(message) {
 
   // Check if the client has not downstreamed the file for which an upstream
   // sync was requested.
-  if(findPathIndexinArray(client.outOfDate, comparePath)) {
+  if(findPathIndexinArray(client.outOfDate, comparePath) !== -1) {
     log.debug({client: client}, 'Upstream sync declined as downstream is required for ' + comparePath);
     response = SyncMessage.error.needsDownstream;
     response.content = {path: comparePath, type: type};
@@ -565,7 +572,7 @@ SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
 
   path = message.content.path;
   type = message.content.type;
-  diffs = message.content.diffs;
+  diffs = diffHelper.deserialize(message.content.diffs);
 
   if(!ensureLock(client, path)) {
     return;
@@ -583,7 +590,6 @@ SyncProtocolHandler.prototype.handleDiffResponse = function(message) {
   try {
     // Block attempts to stop this sync until the patch completes.
     client.closable = false;
-
     rsync.patch(client.fs, path, diffs, rsyncOptions, function(err) {
       if(err) {
         log.error({err: err, client: client}, 'rsync.patch() error');
@@ -731,7 +737,7 @@ SyncProtocolHandler.prototype.handleRootResponse = function(message) {
   var indexInCurrent = findPathIndexinArray(currentDownstreams, path);
   var indexInOutOfDate = findPathIndexinArray(remainingDownstreams, path);
 
-  if(!indexInCurrent) {
+  if(indexInCurrent === -1) {
     log.warn({client: client, syncMessage: message}, 'Client sent a path in handleRootResponse that is not currently downstreaming');
     return;
   }

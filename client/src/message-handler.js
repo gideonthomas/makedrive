@@ -8,6 +8,7 @@ var deserializeDiff = require('../../lib/diff').deserialize;
 var steps = require('./sync-steps');
 var fsUtils = require('../../lib/fs-utils');
 var log = require('./logger.js');
+var findPathIndexinArray = require('../../lib/util.js').findPathIndexinArray;
 
 function onError(syncManager, err) {
   syncManager.session.step = steps.FAILED;
@@ -59,13 +60,13 @@ function handleRequest(syncManager, data) {
       return onError(syncManager, new Error('Server sent insufficient content'));
     }
 
-    sendChecksums(data.content.path, data.content.type, data.content.sourceList);
+    sendChecksums(syncManager, data.content.path, data.content.type, data.content.sourceList);
   }
 
   function handleDiffRequest() {
     if(data.invalidContent(['type', 'checksums'])) {
       log.warn(data, 'Upstream sync message received from the server without sufficient information in handleDiffRequest');
-      return fs.delaySync(function(err, path) {
+      fs.delaySync(function(err, path) {
         if(err) {
           log.error(err, 'An error occured while updating paths to sync in handleDiffRequest');
           return onError(syncManager, err);
@@ -75,16 +76,19 @@ function handleRequest(syncManager, data) {
         syncManager.currentSync = false;
         syncManager.syncUpstream();
       });
+      return;
     }
 
     var path = data.content.path;
     var type = data.content.type;
     var checksums = data.content.checksums;
+    var message;
 
     rsync.diff(rawFs, path, checksums, rsyncOptions, function(err, diffs) {
       if(err){
         log.error(err, 'Error generating diffs in handleDiffRequest for ' + path);
-        return fs.delaySync(function(delayErr, delayedPath) {
+
+        fs.delaySync(function(delayErr, delayedPath) {
           if(delayErr) {
             log.error(err, 'Error updating paths to sync in handleDiffRequest after failing to generate diffs for ' + path);
             return onError(syncManager, delayErr);
@@ -94,11 +98,11 @@ function handleRequest(syncManager, data) {
           syncManager.currentSync = false;
           syncManager.syncUpstream();
         });
+      } else {
+        message = SyncMessage.response.diffs;
+        message.content = {path: path, type: type, diffs: serializeDiff(diffs)};
+        syncManager.send(message.stringify());
       }
-
-      var message = SyncMessage.response.diffs;
-      message.content = {path: path, type: type, diffs: serializeDiff(diffs)};
-      syncManager.send(message.stringify());
     });
   }
 
@@ -267,7 +271,7 @@ function handleResponse(syncManager, data) {
         });
       }
 
-      message = SyncMessage.request.checksum;
+      message = SyncMessage.request.checksums;
       message.content = {path: path, type: type, sourceList: sourceList};
       syncManager.send(message.stringify());
     });
@@ -286,6 +290,8 @@ function handleResponse(syncManager, data) {
         }
 
         sync.onCompleted(dequeuedSync || syncedPath);
+        syncManager.currentSync = false;
+        syncManager.syncUpstream();
       });
     }
 
@@ -368,25 +374,52 @@ function handleResponse(syncManager, data) {
 
       syncManager.needsUpstream = syncManager.needsUpstream ? syncManager.needsUpstream.concat(paths.needsUpstream) : paths.needsUpstream;
 
-      rsyncUtils.generateChecksums(rawFs, paths.synced, true, function(err, checksums) {
+      fsUtils.getPathsToSync(rawFs, fs.root, function(err, pathsToSync) {
         if(err) {
-          log.error('Failed to generate checksums for ' + paths.synced + ' during downstream patch', err);
+          log.error('Failed to update paths to sync during downstream sync', err);
           message = SyncMessage.request.delay;
           message.content = {path: path, type: type};
           syncManager.send(message.stringify());
           return onError(syncManager, err);
         }
 
-        message = SyncMessage.response.patch;
-        message.content = {path: path, type: type, checksums: checksums};
-        syncManager.send(message.stringify());
+        var indexInPathsToSync;
+
+        if(pathsToSync && pathsToSync.toSync) {
+          indexInPathsToSync = findPathIndexinArray(pathsToSync.toSync, path);
+          pathsToSync.toSync.splice(indexInPathsToSync, 1);
+        }
+
+        fsUtils.setPathsToSync(rawFs, fs.root, pathsToSync, function(err) {
+          if(err) {
+            log.error('Failed to update paths to sync during downstream sync', err);
+            message = SyncMessage.request.delay;
+            message.content = {path: path, type: type};
+            syncManager.send(message.stringify());
+            return onError(syncManager, err);
+          }
+
+          rsyncUtils.generateChecksums(rawFs, paths.synced, true, function(err, checksums) {
+            if(err) {
+              log.error('Failed to generate checksums for ' + paths.synced + ' during downstream patch', err);
+              message = SyncMessage.request.delay;
+              message.content = {path: path, type: type};
+              syncManager.send(message.stringify());
+              return onError(syncManager, err);
+            }
+
+            message = SyncMessage.response.patch;
+            message.content = {path: path, type: type, checksums: checksums};
+            syncManager.send(message.stringify());
+          });
+        });
       });
     });
   }
 
   function handleVerificationResponse() {
     var path = data.content.path;
-    syncManager.downstreams.splice(syncManager.downstreams.indexOf(path));
+    syncManager.downstreams.splice(syncManager.downstreams.indexOf(path), 1);
     sync.onCompleted(path, syncManager.needsUpstream);
   }
 

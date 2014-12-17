@@ -249,6 +249,7 @@ function createFS(options) {
       // instance for all rsync operations on the filesystem, so that we
       // can untangle changes done by user vs. sync code.
       manager = new SyncManager(sync, fs, _fs);
+
       manager.init(url, token, options, function(err) {
         if(err) {
           log.error('Error connecting to ' + url, err);
@@ -316,13 +317,12 @@ function createFS(options) {
 
               syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
 
-              if(!syncsLeft.length) {
-                sync.allCompleted();
-                return;
-              }
-
               sync.emit('completed', 'Sync completed for ' + path);
               log.info('Sync completed for ' + path);
+
+              if(!syncsLeft.length) {
+                sync.allCompleted();
+              }
             });
           });
         };
@@ -335,7 +335,7 @@ function createFS(options) {
             sync.state = sync.SYNC_CONNECTED;
           }
 
-          sync.emit('completed', 'MakeDrive has been synced');
+          sync.emit('synced', 'MakeDrive has been synced');
           log.info('All syncs completed');
         };
       });

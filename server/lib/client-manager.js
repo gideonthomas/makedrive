@@ -33,13 +33,13 @@ function runClient(client) {
 
         data = JSON.parse(msg.data);
         message = SyncMessage.parse(data);
-
-        // Delegate ws messages to the sync protocol handler at this point
-        client.handler.handleMessage(message);
       } catch(error) {
         log.error({client: client, err: error}, 'Unable to parse/handle client message. Data was `%s`', msg.data);
-        invalidMessage();
+        return invalidMessage();
       }
+
+      // Delegate ws messages to the sync protocol handler at this point
+      client.handler.handleMessage(message);
     } else {
       log.warn({client: client}, 'Expected string but got binary data over web socket.');
       invalidMessage();
