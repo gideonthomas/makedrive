@@ -73,7 +73,7 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
         });
       });
 
-      sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted() {
         util.ensureRemoteFilesystem(layout, result.jar, function(err) {
           expect(err).not.to.exist;
 
@@ -112,7 +112,7 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
         });
       });
 
-      sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted() {
         util.ensureRemoteFilesystem(layout, result.jar, function(err) {
           expect(err).not.to.exist;
 
@@ -165,19 +165,6 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
       });
 
       sync.connect(util.socketURL, result.token);
-    });
-  });
-
-  it('should remove the \'unsynced\' attribute on non-existent files', function (done) {
-    var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-    var sync = fs.sync;
-    var manager = new syncManager(sync, fs);
-
-    var paths = ['/random/garbage/', '/woah/daddy/'];
-
-    manager.resetUnsynced(paths, function(err){
-      expect(err).not.to.exist;
-      done();
     });
   });
 });

@@ -41,7 +41,7 @@ describe('MakeDrive Client - sync deep tree structure', function(){
         });
       });
 
-      sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted() {
         util.ensureRemoteFilesystem(layout, result.jar, function(err) {
           expect(err).not.to.exist;
           sync.disconnect();

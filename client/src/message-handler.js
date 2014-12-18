@@ -277,19 +277,26 @@ function handleResponse(syncManager, data) {
 
   // As soon as an upstream sync happens, the file synced
   // becomes the last synced version and must be stamped
-  // with its checksum to version it
+  // with its checksum to version it and the unsynced attribute
+  // must be removed
   function handlePatchAckResponse() {
     var syncedPath = data.content.path;
 
     function complete() {
-      fs.dequeueSync(function(err, syncsLeft, dequeuedSync) {
-        if(err) {
-          log.error('Failed to dequeue sync for ' + syncedPath + ' in handlePatchAckResponse, complete()');
+      fsUtils.removeUnsynced(fs, syncedPath, function(err) {
+        if(err && err.code !== 'ENOENT') {
+          log.error('Failed to remove unsynced attribute for ' + syncedPath + ' in handlePatchAckResponse, complete()');
         }
 
-        sync.onCompleted(dequeuedSync || syncedPath);
-        syncManager.currentSync = false;
-        syncManager.syncUpstream();
+        fs.dequeueSync(function(err, syncsLeft, dequeuedSync) {
+          if(err) {
+            log.error('Failed to dequeue sync for ' + syncedPath + ' in handlePatchAckResponse, complete()');
+          }
+
+          sync.onCompleted(dequeuedSync || syncedPath);
+          syncManager.currentSync = false;
+          syncManager.syncUpstream();
+        });
       });
     }
 
@@ -489,6 +496,9 @@ function handleError(syncManager, data) {
     handleUpstreamError();
   } else if(data.is.locked) {
     log.error('Server cannot process upstream request due to ' + path + ' being locked');
+    handleUpstreamError();
+  } else if(data.is.fileSizeError) {
+    log.error('Maximum file size for upstream syncs exceeded for ' + path);
     handleUpstreamError();
   } else if(data.is.checksums) {
     log.error('Error generating checksums on the server for ' + path);

@@ -44,7 +44,7 @@ describe('MakeDrive Client - sync symlink', function() {
         });
       });
 
-      sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted() {
         util.ensureRemoteFilesystem(layout, result.jar, function() {
           fs.symlink('/file1', '/file2', function(err) {
             if (err) throw err;

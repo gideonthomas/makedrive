@@ -420,9 +420,7 @@ function SyncFileSystem(fs) {
   // ourselves. The other down side of this is that we're now including
   // the Shell code twice (once in filer.js, once here). We need to
   // optimize this when we look at making MakeDrive smaller.
-  self.Shell = function(options) {
-    return new Shell(self, options);
-  };
+  self.Shell = Shell.bind(undefined, self);
 
   // Expose extra operations for checking whether path/fd is unsynced
   self.getUnsynced = function(path, callback) {

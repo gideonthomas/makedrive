@@ -24,16 +24,15 @@ describe('Syncing file larger than size limit', function(){
       var layout = {'/hello.txt': new Filer.Buffer(MAX_SIZE_BYTES+1) };
 
       sync.once('connected', function onClientConnected() {
-
         util.createFilesystemLayout(fs, layout, function(err) {
           expect(err).not.to.exist;
 
           sync.request();
         });
-
       });
+
       sync.once('error', function onClientError(error) {
-        expect(error).to.eql(new Error('Maximum file size exceeded'));
+        expect(error).to.eql(new Error('Sync interrupted for path /hello.txt'));
         done();
       });
 
@@ -52,18 +51,18 @@ describe('Syncing file larger than size limit', function(){
       var layout = {'/hello.txt': new Filer.Buffer(MAX_SIZE_BYTES) };
 
       sync.once('connected', function onClientConnected() {
-
         util.createFilesystemLayout(fs, layout, function(err) {
           expect(err).not.to.exist;
 
           sync.request();
         });
-
       });
+
       sync.once('completed', function() {
         expect(everError).to.be.false;
         done();
       });
+
       sync.once('error', function onClientError() {
         everError = true;
       });

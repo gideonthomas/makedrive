@@ -2,10 +2,7 @@ var expect = require('chai').expect;
 var util = require('../../lib/util.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
-var SyncMessage = require('../../../lib/syncmessage');
 var WebSocketServer = require('ws').Server;
-var rsync = require("../../../lib/rsync");
-var rsyncOptions = require('../../../lib/constants').rsyncDefaults;
 
 describe('MakeDrive Client API', function(){
   describe('Core API', function() {
@@ -23,31 +20,31 @@ describe('MakeDrive Client API', function(){
 
     it('should have expected methods and properites', function() {
       // Bits copied from Filer
-      expect(MakeDrive.Buffer).to.be.a.function;
+      expect(MakeDrive.Buffer).to.be.a('function');
       expect(MakeDrive.Path).to.exist;
-      expect(MakeDrive.Path.normalize).to.be.a.function;
+      expect(MakeDrive.Path.normalize).to.be.a('function');
       expect(MakeDrive.Errors).to.exist;
 
       // MakeDrive.fs()
-      expect(MakeDrive.fs).to.be.a.function;
+      expect(MakeDrive.fs).to.be.a('function');
       var fs = MakeDrive.fs({memory: true, manual: true});
       var fs2 = MakeDrive.fs({memory: true, manual: true});
       expect(fs).to.equal(fs2);
 
       // MakeDrive.fs().sync property
       expect(fs.sync).to.exist;
-      expect(fs.sync.on).to.be.a.function;
-      expect(fs.sync.off).to.be.a.function;
-      expect(fs.sync.connect).to.be.a.function;
-      expect(fs.sync.disconnect).to.be.a.function;
-      expect(fs.sync.sync).to.be.a.function;
+      expect(fs.sync.on).to.be.a('function');
+      expect(fs.sync.connect).to.be.a('function');
+      expect(fs.sync.disconnect).to.be.a('function');
+      expect(fs.sync.request).to.be.a('function');
+      expect(fs.sync.manual).to.be.a('function');
+      expect(fs.sync.auto).to.be.a('function');
 
       // Sync States
       expect(fs.sync.SYNC_DISCONNECTED).to.equal("SYNC DISCONNECTED");
       expect(fs.sync.SYNC_CONNECTING).to.equal("SYNC CONNECTING");
       expect(fs.sync.SYNC_CONNECTED).to.equal("SYNC CONNECTED");
       expect(fs.sync.SYNC_SYNCING).to.equal("SYNC SYNCING");
-      expect(fs.sync.SYNC_ERROR).to.equal("SYNC ERROR");
       expect(fs.sync.state).to.equal(fs.sync.SYNC_DISCONNECTED);
     });
 
@@ -104,7 +101,9 @@ describe('MakeDrive Client API', function(){
         var everSeenError = false;
 
         sync.once('connected', function onConnected() {
-          expect(sync.state).to.equal(sync.SYNC_CONNECTED);
+          expect(sync.state).to.satisfy(function(state) {
+            return state === sync.SYNC_CONNECTED || state === sync.SYNC_SYNCING;
+          });
 
           // Write a file and try to sync
           util.createFilesystemLayout(fs, layout, function(err) {
@@ -117,7 +116,7 @@ describe('MakeDrive Client API', function(){
           everSeenSyncing = sync.state;
         });
 
-        sync.once('completed', function onUpstreamCompleted() {
+        sync.once('synced', function onUpstreamCompleted() {
           everSeenCompleted = sync.state;
 
           // Confirm file was really uploaded and remote fs matches what we expect
@@ -184,282 +183,6 @@ describe('MakeDrive Client API', function(){
       testServer = null;
     });
 
-    function endTestSession(sync, done) {
-      sync.once('disconnected', function() {
-        sync = null;
-        done();
-      });
-
-      sync.disconnect();
-    }
-
-    function parseMessage(msg) {
-      msg = msg.data || msg;
-
-      msg = JSON.parse(msg);
-      msg = SyncMessage.parse(msg);
-
-      return msg;
-    }
-
-    it('should restart a downstream sync on receiving a CHKSUM ERROR SyncMessage instead of a sourceList.', function(done){
-      function clientLogic() {
-        var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        var sync = fs.sync;
-        sync.on('error', function(err) {
-          // Confirm our client-side error is emitted as expected
-          expect(err).to.deep.equal(new Error('Could not sync filesystem from server'));
-        });
-
-        sync.connect("ws://127.0.0.1:" + port, "this-is-not-relevant");
-      }
-
-
-      // First, prepare the stub of the server.
-      testServer.on('connection', function(ws){
-        socket = ws;
-
-        // Stub WS auth
-        ws.once('message', function(msg) {
-          msg = msg.data || msg;
-
-          try {
-            msg = JSON.parse(msg);
-          } catch(e) {
-            expect(e, "[Error parsing fake token]").to.not.exist;
-          }
-
-          ws.once('message', function(msg){
-            msg = parseMessage(msg);
-            expect(msg).to.deep.equal(SyncMessage.response.authz);
-
-            ws.once('message', function(msg) {
-              // The next message from the client should be a RESPONSE RESET
-              msg = parseMessage(msg);
-
-              expect(msg).to.deep.equal(SyncMessage.response.reset);
-              done();
-            });
-
-            ws.send(SyncMessage.error.srclist.stringify());
-          });
-
-          ws.send(SyncMessage.response.authz.stringify());
-        });
-      });
-
-      clientLogic();
-    });
-
-    it('should restart a downstream sync on receiving a DIFFS ERROR SyncMessage instead of a sourceList.', function(done){
-      var fs;
-      var sync;
-
-      function clientLogic() {
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
-        sync.on('error', function(err) {
-          // Confirm our client-side error is emitted as expected
-          expect(err).to.deep.equal(new Error('Could not sync filesystem from server'));
-        });
-
-        sync.connect("ws://127.0.0.1:" + port, "this-is-not-relevant");
-      }
-
-      // First, prepare the stub of the server.
-      testServer.on('connection', function(ws){
-        socket = ws;
-
-        // Stub WS auth
-        ws.once('message', function(msg) {
-          msg = msg.data || msg;
-          msg = parseMessage(msg);
-
-          ws.once('message', function(msg){
-            msg = parseMessage(msg);
-            expect(msg).to.deep.equal(SyncMessage.response.authz);
-
-            ws.once('message', function(msg) {
-              // The second message from the client should be a REQUEST DIFFS
-              msg = parseMessage(msg);
-              expect(msg.type).to.equal(SyncMessage.REQUEST);
-              expect(msg.name).to.equal(SyncMessage.DIFFS);
-
-              ws.once('message', function(msg) {
-                // The third message should be a RESPONSE RESET
-                msg = parseMessage(msg);
-
-                expect(msg).to.deep.equal(SyncMessage.response.reset);
-                done();
-              });
-
-              var diffsErrorMessage = SyncMessage.error.diffs;
-              ws.send(diffsErrorMessage.stringify());
-            });
-
-            rsync.sourceList(fs, '/', rsyncOptions, function(err, srcList) {
-              expect(err, "[SourceList generation error]").to.not.exist;
-              var chksumRequest = SyncMessage.request.chksum;
-              chksumRequest.content = {
-                srcList: srcList,
-                path: '/'
-              };
-
-              ws.send(chksumRequest.stringify());
-            });
-          });
-
-          ws.send(SyncMessage.response.authz.stringify());
-        });
-      });
-
-      clientLogic();
-    });
-
-    it('should reset a downstream sync on failing to patch', function(done){
-      var fs;
-      var sync;
-
-      function clientLogic() {
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
-        sync.on('error', function(err) {
-          // Confirm our client-side error is emitted as expected
-          expect(err).to.exist;
-        });
-
-        sync.connect("ws://127.0.0.1:" + port);
-      }
-
-      // First, prepare the stub of the server.
-      testServer.on('connection', function(ws){
-        socket = ws;
-
-        // Stub WS auth
-        ws.once('message', function(msg) {
-          msg = msg.data || msg;
-          msg = parseMessage(msg);
-
-          // after auth
-          ws.once('message', function(msg){
-            msg = parseMessage(msg);
-            expect(msg).to.deep.equal(SyncMessage.response.authz);
-
-            ws.once('message', function(msg) {
-              // The second message from the client should be a REQUEST DIFFS
-              msg = parseMessage(msg);
-              expect(msg.type).to.equal(SyncMessage.REQUEST);
-              expect(msg.name).to.equal(SyncMessage.DIFFS);
-              var message = SyncMessage.response.diffs;
-              message.content = {};
-              message.content.diffs = [];
-              message.content.diffs[0] = {};
-              message.content.diffs[0].diffs = [ { data: [ 102, 117, 110 ] } ];
-
-              ws.once('message', function(msg) {
-                // The third message should be a RESPONSE RESET
-                msg = parseMessage(msg);
-                expect(msg).to.deep.equal(SyncMessage.response.reset);
-
-                endTestSession(sync, done);
-              });
-
-              ws.send(message.stringify());
-            });
-            rsync.sourceList(fs, '/', rsyncOptions, function(err, srcList) {
-              expect(err, "[SourceList generation error]").to.not.exist;
-              var chksumRequest = SyncMessage.request.chksum;
-              chksumRequest.content = {
-                srcList: srcList,
-                path: '/'
-              };
-
-              ws.send(chksumRequest.stringify());
-            });
-          });
-
-          ws.send(SyncMessage.response.authz.stringify());
-        });
-      });
-
-      clientLogic();
-    });
-
-    it('should restart a downstream sync on receiving a verification error', function(done){
-      var fs;
-      var sync;
-
-      function clientLogic() {
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
-        sync.on('error', function(err) {
-          // Confirm our client-side error is emitted as expected
-          expect(err).to.exist;
-        });
-
-        sync.connect("ws://127.0.0.1:" + port);
-      }
-
-      // First, prepare the stub of the server.
-      testServer.on('connection', function(ws){
-        socket = ws;
-
-        // Stub WS auth
-        ws.once('message', function(msg) {
-          msg = msg.data || msg;
-          msg = parseMessage(msg);
-
-          // after auth
-          ws.once('message', function(msg){
-            msg = parseMessage(msg);
-            expect(msg).to.deep.equal(SyncMessage.response.authz);
-
-            ws.once('message', function(msg) {
-              // The second message from the client should be a REQUEST DIFFS
-              msg = parseMessage(msg);
-              expect(msg.type).to.equal(SyncMessage.REQUEST);
-              expect(msg.name).to.equal(SyncMessage.DIFFS);
-              var message = SyncMessage.response.diffs;
-              message.content = {};
-              message.content.diffs = [];
-              message.content.diffs[0] = {path: '/'};
-              message.content.diffs[0].diffs = [];
-              message.content.diffs[1] = {path: '/file.txt'};
-              message.content.diffs[1].diffs = [ { data: [ 102, 117, 110 ] } ];
-
-              ws.once('message', function(msg) {
-                // The third message should be a RESPONSE RESET
-                ws.once('message', function(msg) {
-                  msg = parseMessage(msg);
-                  expect(msg).to.deep.equal(SyncMessage.response.reset);
-                  endTestSession(sync, done);
-                });
-                msg = parseMessage(msg);
-
-                ws.send(SyncMessage.error.verification.stringify());
-              });
-              ws.send(message.stringify());
-
-            });
-            rsync.sourceList(fs, '/', rsyncOptions, function(err, srcList) {
-              expect(err, "[SourceList generation error]").to.not.exist;
-              var chksumRequest = SyncMessage.request.chksum;
-              chksumRequest.content = {
-                srcList: srcList,
-                path: '/'
-              };
-
-              ws.send(chksumRequest.stringify());
-            });
-          });
-
-          ws.send(SyncMessage.response.authz.stringify());
-        });
-      });
-
-      clientLogic();
-    });
-
     it('should emit an error describing an incorrect SYNC_STATE in the sync.request step', function(done){
       util.authenticatedConnection(function( err, result ) {
         expect(err).not.to.exist;
@@ -476,7 +199,7 @@ describe('MakeDrive Client API', function(){
           sync.once('disconnected', function onDisconnected() {
             sync.once('error', function(err){
               expect(err).to.exist;
-              expect(err).to.deep.equal(new Error('Invalid state. Expected ' + sync.SYNC_CONNECTED + ', got ' + sync.SYNC_DISCONNECTED));
+              expect(err).to.deep.equal(new Error('MakeDrive error: MakeDrive cannot sync as it is either disconnected or trying to connect'));
 
               done();
             });
@@ -512,7 +235,7 @@ describe('MakeDrive Client API', function(){
           sync.once('disconnected', function onDisconnected() {
             sync.once('error', function(err){
               expect(err).to.exist;
-              expect(err).to.deep.equal(new Error('Invalid state. ' + sync.state + ' is unexpected.'));
+              expect(err).to.deep.equal(new Error('MakeDrive error: MakeDrive cannot sync as it is either disconnected or trying to connect'));
 
               done();
             });
@@ -526,62 +249,6 @@ describe('MakeDrive Client API', function(){
 
             sync.disconnect();
           });
-        });
-
-        sync.connect(util.socketURL, token);
-      });
-    });
-
-    it('should emit an error describing an already CONNECTED sync.state in the sync.connect step', function(done){
-      util.authenticatedConnection(function( err, result ) {
-        expect(err).not.to.exist;
-
-        var token = result.token;
-        var fs;
-        var sync;
-
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
-
-        sync.once('connected', function onConnected() {
-          sync.once('error', function(err){
-            expect(err).to.exist;
-            expect(err).to.deep.equal(new Error("MakeDrive: Attempted to connect to the websocket URL, but a connection already exists!"));
-
-            done();
-          });
-
-          sync.connect(util.socketURL, token);
-        });
-
-        sync.connect(util.socketURL, token);
-      });
-    });
-
-    it('should emit an error on an attempted sync.disconnect() call when already DISCONNECTED', function(done){
-      util.authenticatedConnection(function( err, result ) {
-        expect(err).not.to.exist;
-
-        var token = result.token;
-        var fs;
-        var sync;
-
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
-
-        sync.once('connected', function onConnected() {
-          sync.once('disconnected', function onDisconnected() {
-            sync.once('error', function(err){
-              expect(err).to.exist;
-              expect(err).to.deep.equal(new Error("MakeDrive: Attempted to disconnect, but no server connection exists!"));
-
-              done();
-            });
-
-            sync.disconnect();
-          });
-
-          sync.disconnect();
         });
 
         sync.connect(util.socketURL, token);

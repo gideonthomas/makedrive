@@ -42,7 +42,7 @@ describe('MakeDrive Client - sync multiple files', function(){
         });
       });
 
-      sync.once('completed', function onUpstreamCompleted() {
+      sync.once('synced', function onUpstreamCompleted() {
         // Make sure all 3 files made it to the server
         util.ensureRemoteFilesystem(layout, result.jar, function() {
           sync.disconnect();
