@@ -14,27 +14,31 @@ describe("Server bugs", function() {
           token: connectionData.token
         };
 
-        var socketPackage = util.openSocket(socketData, {
-          onMessage: function(message) {
-            message = util.toSyncMessage(message);
-            expect(message).to.exist;
-            expect(message.type).to.equal(SyncMessage.REQUEST);
-            expect(message.name).to.equal(SyncMessage.CHKSUM);
-            expect(message.content).to.be.an('object');
+        util.upload(connectionData.username, '/file', 'This is a file', function(err) {
+          expect(err).not.to.exist;
 
-            util.getWebsocketToken(connectionData, function(err, socketData2) {
-              expect(err).to.not.exist;
+          var socketPackage = util.openSocket(socketData, {
+            onMessage: function(message) {
+              message = util.toSyncMessage(message);
+              expect(message).to.exist;
+              expect(message.type).to.equal(SyncMessage.REQUEST);
+              expect(message.name).to.equal(SyncMessage.CHECKSUMS);
+              expect(message.content).to.be.an('object');
 
-              var socketPackage2 = util.openSocket(socketData2, {
-                onMessage: function(message) {
-                  util.cleanupSockets(function() {
-                    connectionData.done();
-                    done();
-                  }, socketPackage, socketPackage2);
-                },
+              util.getWebsocketToken(connectionData, function(err, socketData2) {
+                expect(err).to.not.exist;
+
+                var socketPackage2 = util.openSocket(socketData2, {
+                  onMessage: function(message) {
+                    util.cleanupSockets(function() {
+                      connectionData.done();
+                      done();
+                    }, socketPackage, socketPackage2);
+                  },
+                });
               });
-            });
-          }
+            }
+          });
         });
       });
     });
@@ -101,7 +105,7 @@ describe('Client bugs', function() {
           });
         });
 
-        sync.once('completed', function onUpstreamCompleted() {
+        sync.once('synced', function onUpstreamCompleted() {
           sync.disconnect();
         });
 
@@ -115,7 +119,7 @@ describe('Client bugs', function() {
             });
           });
 
-          sync.once('completed', function reconnectedUpstream() {
+          sync.once('synced', function reconnectedUpstream() {
             util.ensureRemoteFilesystem(layout, jar, function(err) {
               expect(err).not.to.exist;
               done();

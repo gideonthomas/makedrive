@@ -56,7 +56,6 @@ function ensureClient(client) {
   return client;
 }
 
-// TODO: Fix with Dave's impl of Shell().find()
 function getListOfSyncs(fs, callback) {
   var syncList = [];
   var sh = new fs.Shell();
@@ -707,7 +706,7 @@ SyncProtocolHandler.prototype.handleFullDownstream = function() {
       log.error({err: err, client: client}, 'fatal error generating list of syncs to occur in handleFullDownstream');
       return;
     }
-
+console.log(syncs);
     // Nothing in the filesystem, so nothing to sync
     if(!syncs || !syncs.length) {
       return;
