@@ -190,7 +190,7 @@ describe('[HTTP route tests]', function() {
 
             // Write the zip file to filer, unzip, and compare file to original
             var fs = new FileSystem({provider: new FileSystem.providers.Memory(username)});
-            var sh = fs.Shell();
+            var sh = new fs.Shell();
 
             sh.tempDir(function(err, tmp) {
               if(err) throw err;

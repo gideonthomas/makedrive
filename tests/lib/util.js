@@ -10,7 +10,7 @@ var Filer = require('../../lib/filer.js');
 var Buffer = Filer.Buffer;
 var Path = Filer.Path;
 var uuid = require( "node-uuid" );
-var async = require('async');
+var async = require('../../lib/async-lite.js');
 var diffHelper = require("../../lib/diff");
 var deepEqual = require('deep-equal');
 var MakeDrive = require('../../client/src/index.js');
@@ -184,6 +184,14 @@ function authenticate(options, callback){
   });
 }
 
+function run(callback) {
+  if(server.ready) {
+    callback();
+  } else {
+    server.once('ready', callback);
+  }
+}
+
 function authenticateAndConnect(options, callback) {
   if(typeof options === 'function') {
     callback = options;
@@ -209,6 +217,36 @@ function authenticateAndConnect(options, callback) {
 
       callback(null, result1);
     });
+  });
+}
+
+function authenticatedSocket(options, callback) {
+  var socket;
+
+  if(typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+
+  authenticateAndConnect(options, function(err, result) {
+    if(err) {
+      return callback(err);
+    }
+
+    socket = new ws(socketURL);
+    socket.onopen = function() {
+      socket.send(JSON.stringify({token: result.token}));
+    };
+    socket.onmessage = function(message) {
+      expect(message).to.exist;
+      expect(message.data).to.exist;
+
+      var data = JSON.parse(message.data);
+
+      expect(data.type).to.equal(SyncMessage.RESPONSE);
+      expect(data.name).to.equal(SyncMessage.AUTHZ);
+      callback(null, result, socket);
+    };
   });
 }
 
@@ -338,11 +376,12 @@ var downstreamSyncSteps = {
       if (!customAssertions) {
         message = toSyncMessage(message);
 
-        expect(message.type, "[Diffs error: \"" + (message.content && message.content.error) + "\"]").to.equal(SyncMessage.REQUEST);
-        expect(message.name).to.equal(SyncMessage.CHKSUM);
+        expect(message.type, "[Downstream init error: \"" + message.content + "\"]").to.equal(SyncMessage.REQUEST);
+        expect(message.name).to.equal(SyncMessage.CHECKSUMS);
         expect(message.content).to.exist;
-        expect(message.content.srcList).to.exist;
+        expect(message.content.sourceList).to.exist;
         expect(message.content.path).to.exist;
+        expect(message.content.type).to.exist;
 
         return cb(null, data);
       }
@@ -361,7 +400,8 @@ var downstreamSyncSteps = {
     }
 
     var path = data.path;
-    var srcList = data.srcList;
+    var srcList = data.sourceList;
+    var type = data.type;
 
     socketPackage.socket.removeListener("message", socketPackage.onMessage);
     socketPackage.socket.once("message", function(message) {
@@ -371,7 +411,7 @@ var downstreamSyncSteps = {
       if (!customAssertions) {
         message = toSyncMessage(message);
 
-        expect(message.type, "[Diffs error: \"" + (message.content && message.content.error) + "\"]").to.equal(SyncMessage.RESPONSE);
+        expect(message.type, "[Diffs error: \"" + message.content + "\"]").to.equal(SyncMessage.RESPONSE);
         expect(message.name).to.equal(SyncMessage.DIFFS);
         expect(message.content).to.exist;
         expect(message.content.diffs).to.exist;
@@ -391,6 +431,8 @@ var downstreamSyncSteps = {
 
       var diffRequest = SyncMessage.request.diffs;
       diffRequest.content = {
+        path: path,
+        type: type,
         checksums: checksums
       };
 
@@ -425,7 +467,7 @@ var downstreamSyncSteps = {
         expect(checksums).to.exist;
 
         var patchResponse = SyncMessage.response.patch;
-        patchResponse.content = {checksums: checksums};
+        patchResponse.content = {path: data.path, type: data.type, checksums: checksums};
 
         socketPackage.socket.send(patchResponse.stringify());
       });
@@ -511,7 +553,7 @@ var upstreamSyncSteps = {
       if (!customAssertions) {
         message = toSyncMessage(message);
 
-        expect(message.type, "[Diffs error: \"" + (message.content && message.content.error) + "\"]").to.equal(SyncMessage.RESPONSE);
+        expect(message.type, "[Diffs error: \"" + message.content + "\"]").to.equal(SyncMessage.RESPONSE);
         expect(message.name).to.equal(SyncMessage.PATCH);
 
         return cb();
@@ -566,13 +608,13 @@ function prepareDownstreamSync(finalStep, username, token, cb){
           message = toSyncMessage(message);
           expect(message).to.exist;
           expect(message.type).to.equal(SyncMessage.REQUEST);
-          expect(message.name).to.equal(SyncMessage.CHKSUM);
+          expect(message.name).to.equal(SyncMessage.CHECKSUMS);
           expect(message.content).to.exist;
-          expect(message.content.srcList).to.exist;
+          expect(message.content.sourceList).to.exist;
           expect(message.content.path).to.exist;
 
           var downstreamData = {
-            srcList: message.content.srcList,
+            sourceList: message.content.sourceList,
             path: message.content.path
           };
 
@@ -986,7 +1028,25 @@ function setupSyncClient(options, callback) {
   });
 }
 
+function decodeSocketMessage(message) {
+  expect(message).to.exist;
+  expect(message.data).to.exist;
+
+  try {
+    message = JSON.parse(message.data);
+  } catch(err) {
+    expect(err, 'Could not parse ' + message.data).not.to.exist;
+  }
+
+  return message;
+}
+
 module.exports = {
+  run: run,
+  authenticatedSocket: authenticatedSocket,
+  decodeSocketMessage: decodeSocketMessage,
+
+
   // Misc helpers
   ready: ready,
   app: app,

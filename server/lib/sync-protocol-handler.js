@@ -268,7 +268,8 @@ SyncProtocolHandler.prototype.handleMessage = function(message) {
     log.debug({syncMessage: message, client: client}, 'Received sync protocol Response message');
     this.handleResponse(message);
   } else {
-    log.warn({client: client, syncMessage: message}, 'Invalid sync message type');
+    log.warn({client: client, syncMessage: message}, 'Invalid sync message sent by client, relaying it back');
+    client.sendMessage(message);
   }
 };
 
@@ -706,7 +707,7 @@ SyncProtocolHandler.prototype.handleFullDownstream = function() {
       log.error({err: err, client: client}, 'fatal error generating list of syncs to occur in handleFullDownstream');
       return;
     }
-console.log(syncs);
+
     // Nothing in the filesystem, so nothing to sync
     if(!syncs || !syncs.length) {
       return;
