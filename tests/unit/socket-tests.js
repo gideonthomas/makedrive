@@ -2,9 +2,10 @@ var expect = require('chai').expect;
 var util = require('../lib/util.js');
 var SyncMessage = require('../../lib/syncmessage');
 var WS = require('ws');
+var syncModes = require('../../lib/constants').syncModes;
 
-describe('[Downstream Syncing with Websockets]', function(){
-  describe('The server', function(){
+describe('The Server', function(){
+  describe('Socket protocol', function() {
     var socket, socket2;
 
     afterEach(function() {
@@ -117,8 +118,7 @@ describe('[Downstream Syncing with Websockets]', function(){
       });
     });
 
-    it('should send a format SyncMessage error if a non-syncmessage is sent', function(done) {
-
+    it('should send a format SyncMessage error if a non-SyncMessage is sent', function(done) {
       util.authenticatedSocket(function(err, result, socket) {
         if(err) throw err;
 
@@ -133,68 +133,36 @@ describe('[Downstream Syncing with Websockets]', function(){
         socket.send(JSON.stringify({message: 'This is not a sync message'}));
       });
     });
+  });
 
-    it('should allow an initial downstream sync for a new client after an upstream sync has been started', function(done) {
-      // First client connects
-      util.authenticatedConnection({done: done}, function(err, result1) {
-        expect(err).not.to.exist;
+  describe('Downstream syncs', function(){
+    var authResponse = SyncMessage.response.authz.stringify();
 
-        // Second client connects
-        util.authenticatedConnection({username: result1.username}, function(err, result2) {
-          expect(err).not.to.exist;
+    it('should send a "REQUEST" for "CHECKSUMS" SyncMessage to trigger a downstream when a client connects and the server has a non-empty filesystem', function(done) {
+      var username = util.username();
+      var file = {path: '/file', content: 'This is a file'};
 
-          // First client completes the initial downstream sync & begins an upstream sync
-          util.prepareUpstreamSync('requestSync', result1.username, result1.token, function(data1, fs1, socketPackage1){
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
 
-            // Second client attempts an initial downstream sync
-            util.completeDownstreamSync(result1.username, result2.token, function(err, data2, fs2, socketPackage2) {
-              expect(err).not.to.exist;
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
 
-              util.cleanupSockets(function() {
-                result1.done();
-                result2.done();
-              }, socketPackage1, socketPackage2);
-            });
-          });
+          socket.onmessage = function(message) {
+            message = util.decodeSocketMessage(message);
+            expect(message.type).to.equal(SyncMessage.REQUEST);
+            expect(message.name).to.equal(SyncMessage.CHECKSUMS);
+            expect(message.content).to.exist;
+            expect(message.content.path).to.equal(file.path);
+            expect(message.content.type).to.equal(syncModes.CREATE);
+            expect(message.content.sourceList).to.exist;
+            done();
+          };
+
+          socket.send(authResponse);
         });
       });
     });
-
-  //   it('should block a downstream sync reset request from the client after an upstream sync has been started', function(done) {
-  //     // First client connects
-  //     util.authenticatedConnection({done: done}, function(err, result1) {
-  //       expect(err).not.to.exist;
-
-  //       // Second client connects
-  //       util.authenticatedConnection({username: result1.username}, function(err, result2) {
-  //         expect(err).not.to.exist;
-
-  //         // First client completes the initial downstream sync
-  //         util.prepareUpstreamSync(result1.username, result1.token, function(err, data1, fs1, socketPackage1){
-  //           expect(err).not.to.exist;
-
-  //           // Second client begins an upstream sync
-  //           util.prepareUpstreamSync('requestSync', result1.username, result2.token, function(data2, fs2, socketPackage2) {
-  //             // First client sends RESPONSE RESET to start a downstream sync on the first client and expect an error
-  //             util.downstreamSyncSteps.requestSync(socketPackage1, data1, fs1, function(msg, cb) {
-  //               msg = util.toSyncMessage(msg);
-
-  //               expect(msg).to.exist;
-  //               expect(msg.type).to.equal(SyncMessage.ERROR);
-  //               expect(msg.name).to.equal(SyncMessage.DOWNSTREAM_LOCKED);
-
-  //               cb();
-  //             }, function() {
-  //               util.cleanupSockets(function() {
-  //                 result1.done();
-  //                 result2.done();
-  //               }, socketPackage1, socketPackage2);
-  //             });
-  //           });
-  //         });
-  //       });
-  //     });
-  //   });
 
   //   it('should block a downstream sync diffs request from the client after an upstream sync has been started', function(done) {
   //     // First client connects
