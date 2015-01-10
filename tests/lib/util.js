@@ -14,6 +14,7 @@ var async = require('../../lib/async-lite.js');
 var diffHelper = require("../../lib/diff");
 var deepEqual = require('deep-equal');
 var MakeDrive = require('../../client/src/index.js');
+var MD5 = require('MD5');
 
 // Ensure the client timeout restricts tests to a reasonable length
 var env = require('../../server/lib/environment');
@@ -361,6 +362,37 @@ function sendSyncMessage(socketPackage, syncMessage, callback) {
 /**
  * Sync Helpers
  */
+function generateSourceList(files) {
+  return files.map(function(file) {
+    return {
+      path: file.path,
+      modified: Math.floor(Math.random() * 10000000000),
+      size: file.content.length,
+      type: 'FILE'
+    };
+  });
+}
+
+function generateChecksums(files) {
+  var sourceList = generateSourceList(files);
+
+  return sourceList.map(function(file) {
+    delete file.size;
+    file.checksums = [];
+    return file;
+  });
+}
+
+function generateValidationChecksums(files) {
+  return files.map(function(file) {
+    return {
+      path: file.path,
+      type: 'FILE',
+      checksum: MD5(new Buffer(file.content)).toString()
+    };
+  });
+}
+
 var downstreamSyncSteps = {
   requestSync: function(socketPackage, data, fs, customAssertions, cb) {
     if (!cb) {
@@ -1045,7 +1077,9 @@ module.exports = {
   run: run,
   authenticatedSocket: authenticatedSocket,
   decodeSocketMessage: decodeSocketMessage,
-
+  generateSourceList: generateSourceList,
+  generateChecksums: generateChecksums,
+  generateValidationChecksums: generateValidationChecksums,
 
   // Misc helpers
   ready: ready,

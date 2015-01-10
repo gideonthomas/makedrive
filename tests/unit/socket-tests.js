@@ -164,6 +164,69 @@ describe('The Server', function(){
       });
     });
 
+    it('should send a "RESPONSE" of "DIFFS" SyncMessage when requested for diffs', function(done) {
+      var username = util.username();
+      var file = {path: '/file', content: 'This is a file'};
+      var checksums = util.generateChecksums([file]);
+      var diffRequest = SyncMessage.request.diffs;
+      diffRequest.content = {path: file.path, type: syncModes.CREATE, checksums: checksums[0]};
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          socket.onmessage = function(message) {
+            message = util.decodeSocketMessage(message);
+            expect(message.type).to.equal(SyncMessage.RESPONSE);
+            expect(message.name).to.equal(SyncMessage.DIFFS);
+            expect(message.content).to.exist;
+            expect(message.content.path).to.equal(file.path);
+            expect(message.content.type).to.equal(syncModes.CREATE);
+            expect(message.content.diffs).to.exist;
+            done();
+          };
+
+          socket.send(diffRequest.stringify());
+        });
+      });
+    });
+
+    it('should send a "RESPONSE" of "VERIFICATION" SyncMessage on receiving a patch response', function(done) {
+      var username = util.username();
+      var initializedDownstream = false;
+      var file = {path: '/file', content: 'This is a file'};
+      var checksums = util.generateValidationChecksums([file]);
+      var patchResponse = SyncMessage.response.patch;
+      patchResponse.content = {path: file.path, type: syncModes.CREATE, checksums: checksums[0]};
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          socket.onmessage = function(message) {
+            if(!initializedDownstream) {
+              initializedDownstream = true;
+              return socket.send(patchResponse.stringify());
+            }
+
+            message = util.decodeSocketMessage(message);
+            expect(message.type).to.equal(SyncMessage.RESPONSE);
+            expect(message.name).to.equal(SyncMessage.VERIFICATION);
+            expect(message.content).to.exist;
+            expect(message.content.path).to.equal(file.path);
+            expect(message.content.type).to.equal(syncModes.CREATE);
+            done();
+          };
+
+          socket.send(authResponse);
+        });
+      });
+    });
+
   //   it('should block a downstream sync diffs request from the client after an upstream sync has been started', function(done) {
   //     // First client connects
   //     util.authenticatedConnection({done: done}, function(err, result1) {
