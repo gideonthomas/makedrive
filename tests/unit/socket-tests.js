@@ -3,6 +3,35 @@ var util = require('../lib/util.js');
 var SyncMessage = require('../../lib/syncmessage');
 var WS = require('ws');
 var syncModes = require('../../lib/constants').syncModes;
+var FAKE_DATA = 'FAKE DATA';
+
+function validateSocketMessage(message, expectedMessage, checkExists) {
+  message = util.decodeSocketMessage(message);
+  checkExists = checkExists || [];
+
+  expect(message.type).to.equal(expectedMessage.type);
+  expect(message.name).to.equal(expectedMessage.name);
+
+  if(!expectedMessage.content) {
+    expect(message.content).not.to.exist;
+    return;
+  }
+
+  expect(message.content).to.exist;
+
+  if(typeof message.content !== 'object') {
+    expect(message.content).to.equal(expectedMessage.content);
+    return;
+  }
+
+  Object.keys(expectedMessage.content).forEach(function(key) {
+    if(checkExists.indexOf(key) !== -1) {
+      expect(message.content[key]).to.exist;
+    } else {
+      expect(message.content[key]).to.equal(expectedMessage.content[key]);
+    }
+  });
+}
 
 describe('The Server', function(){
   describe('Socket protocol', function() {
@@ -69,13 +98,7 @@ describe('The Server', function(){
 
         socket = new WS(util.socketURL);
         socket.onmessage = function(message) {
-          expect(message).to.exist;
-          expect(message.data).to.exist;
-
-          var data = JSON.parse(message.data);
-
-          expect(data.type).to.equal(SyncMessage.RESPONSE);
-          expect(data.name).to.equal(SyncMessage.AUTHZ);
+          validateSocketMessage(message, SyncMessage.response.authz);
           done();
         };
         socket.onopen = function() {
@@ -98,13 +121,7 @@ describe('The Server', function(){
 
             socket2 = new WS(util.socketURL);
             socket2.onmessage = function(message) {
-              expect(message).to.exist;
-              expect(message.data).to.exist;
-
-              var data = JSON.parse(message.data);
-
-              expect(data.type).to.equal(SyncMessage.RESPONSE);
-              expect(data.name).to.equal(SyncMessage.AUTHZ);
+              validateSocketMessage(message, SyncMessage.response.authz);
               done();
             };
             socket2.onopen = function() {
@@ -123,9 +140,9 @@ describe('The Server', function(){
         if(err) throw err;
 
         socket.onmessage = function(message) {
-          message = util.decodeSocketMessage(message);
-          expect(message.type).to.equal(SyncMessage.ERROR);
-          expect(message.name).to.equal(SyncMessage.INFRMT);
+          var expectedMessage = SyncMessage.error.format;
+          expectedMessage.content = 'Message must be formatted as a sync message';
+          validateSocketMessage(message, expectedMessage);
           socket.close();
           done();
         };
@@ -149,13 +166,9 @@ describe('The Server', function(){
           if(err) throw err;
 
           socket.onmessage = function(message) {
-            message = util.decodeSocketMessage(message);
-            expect(message.type).to.equal(SyncMessage.REQUEST);
-            expect(message.name).to.equal(SyncMessage.CHECKSUMS);
-            expect(message.content).to.exist;
-            expect(message.content.path).to.equal(file.path);
-            expect(message.content.type).to.equal(syncModes.CREATE);
-            expect(message.content.sourceList).to.exist;
+            var expectedMessage = SyncMessage.request.checksums;
+            expectedMessage.content = {path: file.path, type: syncModes.CREATE, sourceList: FAKE_DATA};
+            validateSocketMessage(message, expectedMessage, ['sourceList']);
             done();
           };
 
@@ -178,13 +191,9 @@ describe('The Server', function(){
           if(err) throw err;
 
           socket.onmessage = function(message) {
-            message = util.decodeSocketMessage(message);
-            expect(message.type).to.equal(SyncMessage.RESPONSE);
-            expect(message.name).to.equal(SyncMessage.DIFFS);
-            expect(message.content).to.exist;
-            expect(message.content.path).to.equal(file.path);
-            expect(message.content.type).to.equal(syncModes.CREATE);
-            expect(message.content.diffs).to.exist;
+            var expectedMessage = SyncMessage.response.diffs;
+            expectedMessage.content = {path: file.path, type: syncModes.CREATE, diffs: FAKE_DATA};
+            validateSocketMessage(message, expectedMessage, ['diffs']);
             done();
           };
 
@@ -199,7 +208,7 @@ describe('The Server', function(){
       var file = {path: '/file', content: 'This is a file'};
       var checksums = util.generateValidationChecksums([file]);
       var patchResponse = SyncMessage.response.patch;
-      patchResponse.content = {path: file.path, type: syncModes.CREATE, checksums: checksums[0]};
+      patchResponse.content = {path: file.path, type: syncModes.CREATE, checksum: checksums};
 
       util.upload(username, file.path, file.content, function(err) {
         if(err) throw err;
@@ -208,17 +217,174 @@ describe('The Server', function(){
           if(err) throw err;
 
           socket.onmessage = function(message) {
+            var expectedMessage = SyncMessage.response.verification;
+            expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+
             if(!initializedDownstream) {
               initializedDownstream = true;
               return socket.send(patchResponse.stringify());
             }
 
-            message = util.decodeSocketMessage(message);
-            expect(message.type).to.equal(SyncMessage.RESPONSE);
-            expect(message.name).to.equal(SyncMessage.VERIFICATION);
-            expect(message.content).to.exist;
-            expect(message.content.path).to.equal(file.path);
-            expect(message.content.type).to.equal(syncModes.CREATE);
+            validateSocketMessage(message, expectedMessage);
+            done();
+          };
+
+          socket.send(authResponse);
+        });
+      });
+    });
+
+    it('should allow an upstream sync request for a file if that file has been downstreamed', function(done) {
+      var username = util.username();
+      var file = {path: '/file', content: 'This is a file'};
+      var currentStep = 'AUTH';
+      var checksums = util.generateValidationChecksums([file]);
+      var patchResponse = SyncMessage.response.patch;
+      patchResponse.content = {path: file.path, type: syncModes.CREATE, checksum: checksums};
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          socket.onmessage = function(message) {
+            if(currentStep === 'AUTH') {
+              currentStep = 'PATCH';
+              socket.send(patchResponse.stringify());
+            } else if(currentStep === 'PATCH') {
+              currentStep = null;
+              socket.send(syncRequest.stringify());
+            } else {
+              var expectedMessage = SyncMessage.response.sync;
+              expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+              validateSocketMessage(message, expectedMessage);
+              done();
+            }
+          };
+
+          socket.send(authResponse);
+        });
+      });
+    });
+
+    it('should handle root responses from the client by removing the file from the downstream queue for that client', function(done) {
+      // Since we do not have access to the internals of the server,
+      // we test this case by sending a root response to the server
+      // and requesting an upstream sync for the same file, which
+      // should succeed.
+      var username = util.username();
+      var file = {path: '/file', content: 'This is a file'};
+      var rootMessage = SyncMessage.response.root;
+      rootMessage.content = {path: file.path, type: syncModes.CREATE};
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+      var rootMessageSent = false;
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          socket.onmessage = function(message) {
+            if(!rootMessageSent) {
+              // NOTE: Under normal circumstances, a sync request
+              // message would not be sent to the server, however
+              // since that is the only way to test server internals
+              // (indirectly), this has an important implication.
+              // This test may fail as two socket messages are sent
+              // one after the other and an ASSUMPTION has been made
+              // that the first socket message executes completely
+              // before the second socket message executes. If this
+              // test fails, the most likely cause would be the below
+              // three lines of code that introduces a timing issue.
+              socket.send(rootMessage.stringify());
+              rootMessageSent = true;
+              return socket.send(syncRequest.stringify());
+            }
+
+            var expectedMessage = SyncMessage.response.sync;
+            expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+            validateSocketMessage(message, expectedMessage);
+            done();
+          };
+
+          socket.send(authResponse);
+        });
+      });
+    });
+
+    it('should send a "DOWNSTREAM_LOCKED" "ERROR" if a "REQUEST" for "DIFFS" is sent while an upstream sync is triggered for the same file by another client', function(done) {
+      var username = util.username();
+      var file = {path: '/file', content: 'This is a file'};
+      var checksums = util.generateChecksums([file]);
+      var diffRequest = SyncMessage.request.diffs;
+      diffRequest.content = {path: file.path, type: syncModes.CREATE, checksums: checksums[0]};
+      var authorized = false;
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          util.authenticatedSocket({username: username}, function(err, result, socket2) {
+            if(err) throw err;
+
+            socket.onmessage = function(message) {
+              if(!authorized) {
+                authorized = true;
+                return socket2.send(syncRequest.stringify());
+              }
+
+              var expectedMessage = SyncMessage.error.downstreamLocked;
+              expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+              validateSocketMessage(message, expectedMessage);
+              done();
+            };
+
+            socket2.onmessage = function() {
+              socket.send(diffRequest.stringify());
+            };
+
+            socket.send(authResponse);
+          });
+        });
+      });
+    });
+
+    it('should send a "VERIFICATION" "ERROR" SyncMessage on receiving a patch response that incorrectly patched a file on the client', function(done) {
+      var username = util.username();
+      var initializedDownstream = false;
+      var file = {path: '/file', content: 'This is a file'};
+      var patchResponse = SyncMessage.response.patch;
+      patchResponse.content = {path: file.path, type: syncModes.CREATE};
+
+      util.upload(username, file.path, file.content, function(err) {
+        if(err) throw err;
+
+        file.content = 'Modified content';
+        patchResponse.content.checksum = util.generateValidationChecksums([file]);
+        console.log('Sending: ', patchResponse.content.checksum);
+
+        util.authenticatedSocket({username: username}, function(err, result, socket) {
+          if(err) throw err;
+
+          socket.onmessage = function(message) {
+            var expectedMessage = SyncMessage.error.verification;
+            expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+
+            if(!initializedDownstream) {
+              initializedDownstream = true;
+              return socket.send(patchResponse.stringify());
+            }
+
+            validateSocketMessage(message, expectedMessage);
             done();
           };
 

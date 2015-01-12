@@ -12,9 +12,11 @@ var unzip = require("../lib/unzip.js");
 describe('[HTTP route tests]', function() {
 
   it('should allow CORS access to /api/sync route', function(done) {
-    request.get(util.serverURL + '/api/sync', { headers: {origin: ALLOW_DOMAINS }}, function(req, res) {
-      expect(ALLOW_DOMAINS).to.contain(res.headers['access-control-allow-origin']);
-      done();
+    util.ready(function() {
+      request.get(util.serverURL + '/api/sync', { headers: {origin: ALLOW_DOMAINS }}, function(req, res) {
+        expect(ALLOW_DOMAINS).to.contain(res.headers['access-control-allow-origin']);
+        done();
+      });
     });
   });
 

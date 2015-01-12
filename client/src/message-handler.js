@@ -136,7 +136,7 @@ function handleRequest(syncManager, data) {
         return onError(syncManager, err);
       }
 
-      rsyncUtils.generateChecksums(rawFs, [path], true, function(err, checksums) {
+      rsyncUtils.generateChecksums(rawFs, [path], true, function(err, checksum) {
         if(err) {
           log.error('Failed to generate checksums for ' + path + ' during downstream rename', err);
           message = SyncMessage.request.delay;
@@ -146,7 +146,7 @@ function handleRequest(syncManager, data) {
         }
 
         message = SyncMessage.response.patch;
-        message.content = {path: path, type: type, checksums: checksums};
+        message.content = {path: path, type: type, checksum: checksum};
         syncManager.send(message.stringify());
       });
     });
@@ -183,7 +183,7 @@ function handleRequest(syncManager, data) {
         return onError(syncManager, err);
       }
 
-      rsyncUtils.generateChecksums(rawFs, [path], false, function(err, checksums) {
+      rsyncUtils.generateChecksums(rawFs, [path], false, function(err, checksum) {
         if(err) {
           log.error('Failed to generate checksums for ' + path + ' during downstream delete', err);
           message = SyncMessage.request.delay;
@@ -193,7 +193,7 @@ function handleRequest(syncManager, data) {
         }
 
         message = SyncMessage.response.patch;
-        message.content = {path: path, type: type, checksums: checksums};
+        message.content = {path: path, type: type, checksum: checksum};
         syncManager.send(message.stringify());
       });
     });
@@ -404,7 +404,7 @@ function handleResponse(syncManager, data) {
             return onError(syncManager, err);
           }
 
-          rsyncUtils.generateChecksums(rawFs, paths.synced, true, function(err, checksums) {
+          rsyncUtils.generateChecksums(rawFs, paths.synced, true, function(err, checksum) {
             if(err) {
               log.error('Failed to generate checksums for ' + paths.synced + ' during downstream patch', err);
               message = SyncMessage.request.delay;
@@ -414,7 +414,7 @@ function handleResponse(syncManager, data) {
             }
 
             message = SyncMessage.response.patch;
-            message.content = {path: path, type: type, checksums: checksums};
+            message.content = {path: path, type: type, checksum: checksum};
             syncManager.send(message.stringify());
           });
         });

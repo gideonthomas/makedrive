@@ -829,16 +829,16 @@ SyncProtocolHandler.prototype.handlePatchResponse = function(message) {
     return;
   }
 
-  if(message.invalidContent(['type', 'checksums'])) {
-    log.warn({client: client, syncMessage: message}, 'Missing content.type or content.checksums in handlePatchResponse()');
+  if(message.invalidContent(['type', 'checksum'])) {
+    log.warn({client: client, syncMessage: message}, 'Missing content.type or content.checksum in handlePatchResponse()');
     return client.sendMessage(SyncMessage.error.content);
   }
 
-  var checksums = message.content.checksums;
+  var checksum = message.content.checksum;
   var type = message.content.type;
   var path = message.content.path;
 
-  rsync.utils.compareContents(client.fs, checksums, function(err, equal) {
+  rsync.utils.compareContents(client.fs, checksum, function(err, equal) {
     var response;
 
     // We need to check if equal is true because equal can have three possible
