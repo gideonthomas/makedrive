@@ -1,6 +1,5 @@
 var expect = require('chai').expect;
 var util = require('../lib/util.js');
-var SyncMessage = require('../../lib/syncmessage');
 var MakeDrive = require('../../client/src');
 var Filer = require('../../lib/filer.js');
 var fsUtils = require('../../lib/fs-utils.js');
