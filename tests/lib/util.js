@@ -383,6 +383,16 @@ function generateChecksums(files) {
   });
 }
 
+function generateDiffs(files) {
+  var checksums = generateChecksums(files);
+
+  return checksums.map(function(file, index) {
+    delete file.checksums;
+    file.diffs = [{data: new Buffer(files[index].content)}];
+    return file;
+  });
+}
+
 function generateValidationChecksums(files) {
   return files.map(function(file) {
     return {
@@ -1079,6 +1089,7 @@ module.exports = {
   decodeSocketMessage: decodeSocketMessage,
   generateSourceList: generateSourceList,
   generateChecksums: generateChecksums,
+  generateDiffs: generateDiffs,
   generateValidationChecksums: generateValidationChecksums,
 
   // Misc helpers

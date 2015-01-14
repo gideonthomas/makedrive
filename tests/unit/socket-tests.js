@@ -4,6 +4,7 @@ var SyncMessage = require('../../lib/syncmessage');
 var WS = require('ws');
 var syncModes = require('../../lib/constants').syncModes;
 var FAKE_DATA = 'FAKE DATA';
+var diffHelper = require('../../lib/diff');
 
 function validateSocketMessage(message, expectedMessage, checkExists) {
   message = util.decodeSocketMessage(message);
@@ -370,7 +371,6 @@ describe('The Server', function(){
 
         file.content = 'Modified content';
         patchResponse.content.checksum = util.generateValidationChecksums([file]);
-        console.log('Sending: ', patchResponse.content.checksum);
 
         util.authenticatedSocket({username: username}, function(err, result, socket) {
           if(err) throw err;
@@ -390,6 +390,115 @@ describe('The Server', function(){
 
           socket.send(authResponse);
         });
+      });
+    });
+  });
+
+  describe('Upstream syncs', function() {
+    var file = {path: '/file', content: 'This is a file'};
+
+    it('should send a "RESPONSE" of "SYNC" if a sync is requested on a file without a lock', function(done) {
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+
+      util.authenticatedSocket(function(err, result, socket) {
+        if(err) throw err;
+
+        socket.onmessage = function(message) {
+          var expectedMessage = SyncMessage.response.sync;
+          expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+
+          validateSocketMessage(message, expectedMessage);
+          done();
+        };
+
+        socket.send(syncRequest.stringify());
+      });
+    });
+
+    it('should send a "LOCKED" "ERROR" if a sync is requested on a file that is locked', function(done) {
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+
+      util.authenticatedSocket(function(err, result, socket) {
+        if(err) throw err;
+
+        util.authenticatedSocket({username: result.username}, function(err, result, socket2) {
+          if(err) throw err;
+
+          socket.onmessage = function() {
+            socket2.send(syncRequest.stringify());
+          };
+
+          socket2.onmessage = function(message) {
+            var expectedMessage = SyncMessage.error.locked;
+            expectedMessage.content = {error: 'Sync already in progress', path: file.path, type: syncModes.CREATE};
+
+            validateSocketMessage(message, expectedMessage);
+            done();
+          };
+
+          socket.send(syncRequest.stringify());
+        });
+      });
+    });
+
+    it('should send a "REQUEST" for "DIFFS" containing checksums when requested for checksums', function(done) {
+      var syncRequested = false;
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+      var checksumRequest = SyncMessage.request.checksums;
+      checksumRequest.content = {path: file.path, type: syncModes.CREATE, sourceList: util.generateSourceList([file])};
+
+      util.authenticatedSocket(function(err, result, socket) {
+        if(err) throw err;
+
+        socket.onmessage = function(message) {
+          var expectedMessage = SyncMessage.request.diffs;
+          expectedMessage.content = {path: file.path, type: syncModes.CREATE, checksums: FAKE_DATA};
+
+          if(!syncRequested) {
+            syncRequested = true;
+            return socket.send(checksumRequest.stringify());
+          }
+
+          validateSocketMessage(message, expectedMessage, ['checksums']);
+          done();
+        };
+
+        socket.send(syncRequest.stringify());
+      });
+    });
+
+    it('should patch the file being synced and send a "RESPONSE" of "PATCH" on receiving a diff response', function(done) {
+      var syncRequested = false;
+      var syncRequest = SyncMessage.request.sync;
+      syncRequest.content = {path: file.path, type: syncModes.CREATE};
+      var diffResponse = SyncMessage.response.diffs;
+      diffResponse.content = {path: file.path, type: syncModes.CREATE, diffs: diffHelper.serialize(util.generateDiffs([file]))};
+      var layout = {};
+      layout[file.path] = file.content;
+
+      util.authenticatedSocket(function(err, result, socket) {
+        if(err) throw err;
+
+        socket.onmessage = function(message) {
+          var expectedMessage = SyncMessage.response.patch;
+          expectedMessage.content = {path: file.path, type: syncModes.CREATE};
+
+          if(!syncRequested) {
+            syncRequested = true;
+            return socket.send(diffResponse.stringify());
+          }
+
+          validateSocketMessage(message, expectedMessage);
+          util.ensureRemoteFilesystem(layout, result.jar, function(err) {
+            expect(err).not.to.exist;
+            done();
+          });
+        };
+
+        socket.send(syncRequest.stringify());
       });
     });
 
