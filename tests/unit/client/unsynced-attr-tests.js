@@ -11,7 +11,7 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
   var provider;
 
   beforeEach(function(done) {
-    util.ready(function() {
+    util.run(function() {
       provider = new Filer.FileSystem.providers.Memory(util.username());
       done();
     });

@@ -7,7 +7,7 @@ describe('MakeDrive Client - sync multiple files', function(){
   var provider;
 
   beforeEach(function(done) {
-    util.ready(function() {
+    util.run(function() {
       provider = new Filer.FileSystem.providers.Memory(util.username());
       done();
     });
@@ -54,7 +54,7 @@ describe('MakeDrive Client - sync multiple files', function(){
           expect(err).not.to.exist;
 
           // Re-sync with server and make sure we get our files back
-          sync.once('connected', function onSecondDownstreamSync() {
+          sync.once('synced', function onSecondDownstreamSync() {
 
             sync.once('disconnected', function onSecondDisconnected() {
               util.ensureFilesystem(fs, layout, function(err) {

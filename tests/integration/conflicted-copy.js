@@ -42,7 +42,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
 
   // Create 2 sync clients, do downstream syncs, then dirty both filesystems
   beforeEach(function(done) {
-    util.ready(function() {
+    util.run(function() {
       var username = util.username();
 
       util.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {

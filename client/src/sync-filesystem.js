@@ -254,8 +254,8 @@ function SyncFileSystem(fs) {
 
       function wrappedCallback() {
         var args = Array.prototype.slice.call(arguments, 0);
-        if(args[0]) {
-          return callback(args[0]);
+        if(args[0] || mode === syncModes.DELETE) {
+          return callback.apply(null, args);
         }
 
         setUnsyncedFn(pathOrFD, function(err) {

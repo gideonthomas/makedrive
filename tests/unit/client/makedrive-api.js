@@ -9,7 +9,7 @@ describe('MakeDrive Client API', function(){
     var provider;
 
     beforeEach(function(done) {
-      util.ready(function() {
+      util.run(function() {
         provider = new Filer.FileSystem.providers.Memory(util.username());
         done();
       });
@@ -161,7 +161,7 @@ describe('MakeDrive Client API', function(){
     var testServer;
 
     beforeEach(function(done) {
-      util.ready(function() {
+      util.run(function() {
         provider = new Filer.FileSystem.providers.Memory(util.username());
 
         testServer = new WebSocketServer({port: port});

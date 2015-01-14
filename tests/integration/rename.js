@@ -8,7 +8,7 @@ describe('MakeDrive Client - file rename integration', function(){
 
   // Create 2 sync clients, do downstream syncs
   beforeEach(function(done) {
-    util.ready(function() {
+    util.run(function() {
       var username = util.username();
 
       util.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {

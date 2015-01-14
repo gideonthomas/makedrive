@@ -8,7 +8,7 @@ describe('MakeDrive Client - Automatic syncing', function(){
   var syncingEventFired;
 
   beforeEach(function(done) {
-    util.ready(function() {
+    util.run(function() {
       provider = new Filer.FileSystem.providers.Memory(util.username());
       syncingEventFired = false;
       done();
@@ -56,7 +56,7 @@ describe('MakeDrive Client - Automatic syncing', function(){
           expect(err).not.to.exist;
 
           // Re-sync with server and make sure we get our file back
-          sync.once('connected', function onSecondDownstreamSync() {
+          sync.once('completed', function onSecondDownstreamSync() {
 
             sync.once('disconnected', function onSecondDisconnected() {
               util.ensureFilesystem(fs, layout, function(err) {
@@ -116,7 +116,7 @@ describe('MakeDrive Client - Automatic syncing', function(){
           expect(err).not.to.exist;
 
           // Re-sync with server and make sure we get our file back
-          sync.once('connected', function onSecondDownstreamSync() {
+          sync.once('completed', function onSecondDownstreamSync() {
 
             sync.once('disconnected', function onSecondDisconnected() {
               util.ensureFilesystem(fs, layout, function(err) {

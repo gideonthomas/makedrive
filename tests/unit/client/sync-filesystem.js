@@ -155,26 +155,26 @@ describe('MakeDrive Client SyncFileSystem', function(){
     });
   });
 
-  it('should allow fs.rmdir and mark parent dir unsynced', function(done) {
+  it('should allow fs.rmdir', function(done) {
     fs.mkdir('/newdir', function(err) {
       if(err) throw err;
 
       fs.rmdir('/newdir', function(err) {
         if(err) throw err;
 
-        expectMakeDriveUnsyncedAttribForPath('/', done);
+        done();
       });
     });
   });
 
-  it('should allow fs.unlink and mark parent dir unsynced', function(done) {
+  it('should allow fs.unlink', function(done) {
     fs.writeFile('/file', 'data', function(err) {
       if(err) throw err;
 
       fs.unlink('/file', function(err) {
         if(err) throw err;
 
-        expectMakeDriveUnsyncedAttribForPath('/', done);
+        done();
       });
     });
   });
