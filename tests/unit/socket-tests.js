@@ -536,3 +536,10 @@ describe('The Server', function(){
     });
   });
 });
+
+describe('The Client', function() {
+  describe('Socket protocol', function() {
+
+  });
+});
+
