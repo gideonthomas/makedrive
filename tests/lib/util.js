@@ -242,7 +242,7 @@ function authenticatedSocket(options, callback) {
 /**
  * Socket Helpers
  */
- function decodeSocketMessage(message) {
+function decodeSocketMessage(message) {
   expect(message).to.exist;
   expect(message.data).to.exist;
 
