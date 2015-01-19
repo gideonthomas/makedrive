@@ -25,7 +25,7 @@ describe('MakeDrive Client - Automatic syncing', function(){
    * non-developer
    */
   it('should complete a sync process with the default time interval', function(done) {
-    server.authenticatedConnection(function( err, result ) {
+    server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
       var fs = MakeDrive.fs({provider: provider, forceCreate: true});
