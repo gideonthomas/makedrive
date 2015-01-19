@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../../lib/util.js');
+var server = require('../../lib/server-utils.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 var WebSocketServer = require('ws').Server;
@@ -9,7 +10,7 @@ describe('MakeDrive Client API', function(){
     var provider;
 
     beforeEach(function(done) {
-      util.run(function() {
+      server.run(function() {
         provider = new Filer.FileSystem.providers.Memory(util.username());
         done();
       });
@@ -86,7 +87,7 @@ describe('MakeDrive Client API', function(){
      * checks that the file was uploaded.
      */
     it('should go through proper steps with connect(), request(), disconnect()', function(done) {
-      util.authenticatedConnection(function( err, result ) {
+      server.authenticatedConnection(function(err, result) {
         expect(err).not.to.exist;
 
         var token = result.token;
@@ -120,7 +121,7 @@ describe('MakeDrive Client API', function(){
           everSeenCompleted = sync.state;
 
           // Confirm file was really uploaded and remote fs matches what we expect
-          util.ensureRemoteFilesystem(layout, result.jar, function() {
+          server.ensureRemoteFilesystem(layout, result.jar, function() {
             sync.disconnect();
           });
         });
@@ -142,7 +143,7 @@ describe('MakeDrive Client API', function(){
         });
 
         expect(sync.state).to.equal(sync.SYNC_DISCONNECTED);
-        sync.connect(util.socketURL, token);
+        sync.connect(server.socketURL, token);
         expect(sync.state).to.equal(sync.SYNC_CONNECTING);
       });
     });
@@ -161,7 +162,7 @@ describe('MakeDrive Client API', function(){
     var testServer;
 
     beforeEach(function(done) {
-      util.run(function() {
+      server.run(function() {
         provider = new Filer.FileSystem.providers.Memory(util.username());
 
         testServer = new WebSocketServer({port: port});
@@ -184,7 +185,7 @@ describe('MakeDrive Client API', function(){
     });
 
     it('should emit an error describing an incorrect SYNC_STATE in the sync.request step', function(done){
-      util.authenticatedConnection(function( err, result ) {
+      server.authenticatedConnection(function( err, result ) {
         expect(err).not.to.exist;
 
         var token = result.token;
@@ -215,12 +216,12 @@ describe('MakeDrive Client API', function(){
           });
         });
 
-        sync.connect(util.socketURL, token);
+        sync.connect(server.socketURL, token);
       });
     });
 
     it('should emit an error warning about an unexpected sync.state when calling the sync.auto step', function(done){
-      util.authenticatedConnection(function( err, result ) {
+      server.authenticatedConnection(function(err, result) {
         expect(err).not.to.exist;
 
         var token = result.token;
@@ -251,7 +252,7 @@ describe('MakeDrive Client API', function(){
           });
         });
 
-        sync.connect(util.socketURL, token);
+        sync.connect(server.socketURL, token);
       });
     });
   });

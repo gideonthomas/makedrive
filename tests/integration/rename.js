@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../lib/util.js');
+var server = require('../lib/server-utils.js');
 
 describe('MakeDrive Client - file rename integration', function(){
   var client1;
@@ -8,14 +9,14 @@ describe('MakeDrive Client - file rename integration', function(){
 
   // Create 2 sync clients, do downstream syncs
   beforeEach(function(done) {
-    util.run(function() {
+    server.run(function() {
       var username = util.username();
 
-      util.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {
+      server.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {
         if(err) throw err;
 
         client1 = client;
-        util.setupSyncClient({username: username, manual: true}, function(err, client) {
+        server.setupSyncClient({username: username, manual: true}, function(err, client) {
           if(err) throw err;
 
           client2 = client;

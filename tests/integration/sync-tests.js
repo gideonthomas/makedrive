@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../lib/util.js');
+var server = require('../lib/server-utils.js');
 var MakeDrive = require('../../client/src');
 var Filer = require('../../lib/filer.js');
 
@@ -7,7 +8,7 @@ describe('Two clients', function(){
   var provider1, provider2;
 
   beforeEach(function(done) {
-    util.run(function() {
+    server.run(function() {
       var username = util.username();
       provider1 = new Filer.FileSystem.providers.Memory(username + '_1');
       provider2 = new Filer.FileSystem.providers.Memory(username + '_2');
@@ -25,7 +26,7 @@ describe('Two clients', function(){
     var finalLayout = { '/dir/file1.txt': 'This is file 1',
                         '/dir/file2.txt': 'This is file 2' };
 
-    util.authenticatedConnection(function(err, result1) {
+    server.authenticatedConnection(function(err, result1) {
       expect(err).not.to.exist;
 
       // Filesystem and sync object of first client
@@ -34,7 +35,7 @@ describe('Two clients', function(){
 
       // Step 1: First client has connected
       sync1.once('connected', function onClient1Connected() {
-        util.authenticatedConnection({username: result1.username}, function(err, result2) {
+        server.authenticatedConnection({username: result1.username}, function(err, result2) {
           expect(err).not.to.exist;
 
           // Filesystem and sync object of second client
@@ -45,7 +46,7 @@ describe('Two clients', function(){
           sync2.once('connected', function onClient2Connected() {
             // Step 3: First client has completed upstream sync #1
             sync1.once('synced', function onClient1Upstream1() {
-              util.ensureRemoteFilesystem(file1, result1.jar, function(err) {
+              server.ensureRemoteFilesystem(file1, result1.jar, function(err) {
                 expect(err).not.to.exist;
               });
             });
@@ -65,7 +66,7 @@ describe('Two clients', function(){
 
                 // Step 5: First client has completed upstream sync #2
                 sync1.once('synced', function onClient1Upstream2() {
-                  util.ensureRemoteFilesystem(finalLayout, result1.jar, function(err) {
+                  server.ensureRemoteFilesystem(finalLayout, result1.jar, function(err) {
                     expect(err).not.to.exist;
                   });
                 });
@@ -94,11 +95,11 @@ describe('Two clients', function(){
             });
           });
 
-          sync2.connect(util.socketURL, result2.token);
+          sync2.connect(server.socketURL, result2.token);
         });
       });
 
-      sync1.connect(util.socketURL, result1.token);
+      sync1.connect(server.socketURL, result1.token);
     });
   });
 });

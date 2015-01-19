@@ -349,11 +349,11 @@ function handleResponse(syncManager, data) {
     });
   }
 
-  function handlePatchResponse() {
+  function handleDiffResponse() {
     var message;
 
     if(data.invalidContent(['type', 'diffs'])) {
-      log.error('Path, type or diffs not sent by server in handlePatchResponse.', data);
+      log.error('Path, type or diffs not sent by server in handleDiffResponse.', data);
       return onError(syncManager, new Error('Server sent insufficient content'));
     }
 
@@ -436,7 +436,7 @@ function handleResponse(syncManager, data) {
     handlePatchAckResponse();
   } else if(data.is.diffs) {
     // DOWNSTREAM - PATCH
-    handlePatchResponse();
+    handleDiffResponse();
   } else if(data.is.verification) {
     // DOWNSTREAM - PATCH VERIFICATION
     handleVerificationResponse();

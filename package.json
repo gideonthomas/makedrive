@@ -78,7 +78,7 @@
     "redis": "^0.12.1",
     "useragent": "^2.1.0",
     "webmaker-auth": "0.0.14",
-    "ws": "^0.4.31"
+    "ws": "^0.6.5"
   },
   "optionalDependencies": {
     "hiredis": "^0.1.17"

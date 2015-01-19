@@ -1,16 +1,13 @@
 var WebServer = require('../../server/web-server.js');
 var WebSocketServer = require('ws').Server;
 var env = require('../../server/lib/environment');
-var uuid = require( "node-uuid" );
 var expect = require('chai').expect;
+var SyncMessage = require('../../lib/syncmessage.js');
 
 var SocketServer;
 var serverURL = 'http://127.0.0.1:' + env.get('PORT');
 var socketURL = serverURL.replace( 'http', 'ws' );
-
-function uniqueUsername() {
-  return 'user' + uuid.v4();
-}
+var TOKEN = 'TOKEN';
 
 function run(callback) {
   if(SocketServer) {
@@ -37,10 +34,25 @@ function decodeSocketMessage(message) {
   return message;
 }
 
+function authenticateAndRun(sync, callback) {
+  SocketServer.once('connection', function(client) {
+    client.once('message', function() {
+      client.once('message', function(message) {
+        callback(client, message);
+      });
+
+      client.send(SyncMessage.response.authz.stringify());
+    });
+  });
+
+  sync.connect(socketURL, TOKEN);
+}
+
 module.exports = {
   serverURL: serverURL,
   socketURL: socketURL,
-  username: uniqueUsername,
+  TOKEN: TOKEN,
   run: run,
-  decodeSocketMessage: decodeSocketMessage
+  decodeSocketMessage: decodeSocketMessage,
+  authenticateAndRun: authenticateAndRun
 };

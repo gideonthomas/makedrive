@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../../lib/util.js');
+var server = require('../../lib/server-utils.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 var MAX_SIZE_BYTES = 2000000;
@@ -16,7 +17,7 @@ describe('Syncing file larger than size limit', function(){
   });
 
   it('should return an error if file exceeded the size limit', function(done) {
-    util.authenticatedConnection(function(err, result) {
+    server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
       var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
@@ -36,14 +37,14 @@ describe('Syncing file larger than size limit', function(){
         done();
       });
 
-      sync.connect(util.socketURL, result.token);
+      sync.connect(server.socketURL, result.token);
     });
   });
 
   it('should not return an error if file did not exceed the size limit', function(done) {
     var everError = false;
 
-    util.authenticatedConnection(function(err, result) {
+    server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
       var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
@@ -67,7 +68,7 @@ describe('Syncing file larger than size limit', function(){
         everError = true;
       });
 
-      sync.connect(util.socketURL, result.token);
+      sync.connect(server.socketURL, result.token);
     });
   });
 });

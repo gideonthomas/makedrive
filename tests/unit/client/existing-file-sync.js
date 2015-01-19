@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../../lib/util.js');
+var server = require('../../lib/server-utils.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 
@@ -23,11 +24,11 @@ describe('Syncing when a file already exists on the client', function(){
     fs1.writeFile('/abc.txt', 'this is a simple file', function(err) {
       if(err) throw err;
 
-      util.upload(username, '/file', 'This is a file that should be downstreamed', function(err){
+      server.upload(username, '/file', 'This is a file that should be downstreamed', function(err){
         if(err) throw err;
 
         // 2. try to connect after successfully changing the local filesystem
-        util.authenticatedConnection({username: username}, function(err, result1) {
+        server.authenticatedConnection({username: username}, function(err, result1) {
           if(err) throw err;
           var sync1 = fs1.sync;
 
@@ -42,7 +43,7 @@ describe('Syncing when a file already exists on the client', function(){
           });
 
           // 3. try and conect to the server
-          sync1.connect(util.socketURL, result1.token);
+          sync1.connect(server.socketURL, result1.token);
         });
       });
     });

@@ -40,7 +40,7 @@ function SyncFileSystem(fs) {
     var indexInRecordedPaths = recordedPaths.indexOf(path);
     recordedPaths.splice(indexInRecordedPaths, 1);
     changesDuringDownstream.splice(changesDuringDownstream.indexOf(path), 1);
-    return sourceListCache.splice(indexInRecordedPaths, 1);
+    return sourceListCache.splice(indexInRecordedPaths, 1)[0];
   };
 
   // Get the paths queued up to sync

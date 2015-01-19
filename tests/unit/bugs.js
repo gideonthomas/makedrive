@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../lib/util.js');
+var server = require('../lib/server-utils.js');
 var MakeDrive = require('../../client/src');
 var Filer = require('../../lib/filer.js');
 var fsUtils = require('../../lib/fs-utils.js');
@@ -9,7 +10,7 @@ describe("Server bugs", function() {
     it('should fix timing issue with server holding onto active sync for user after completed', function(done) {
       var layout = {'/dir/file.txt': 'This is file 1'};
 
-      util.setupSyncClient({manual: true, layout: layout}, function(err, client) {
+      server.setupSyncClient({manual: true, layout: layout}, function(err, client) {
         expect(err).not.to.exist;
 
         var fs = client.fs;
@@ -50,7 +51,7 @@ describe('Client bugs', function() {
       var sync = fs.sync;
       var jar;
 
-      util.authenticatedConnection(function(err, result) {
+      server.authenticatedConnection(function(err, result) {
         if(err) throw err;
 
         var layout = {'/hello': 'hello',
@@ -81,13 +82,13 @@ describe('Client bugs', function() {
           });
 
           sync.once('synced', function reconnectedUpstream() {
-            util.ensureRemoteFilesystem(layout, jar, function(err) {
+            server.ensureRemoteFilesystem(layout, jar, function(err) {
               expect(err).not.to.exist;
               done();
             });
           });
 
-          util.ensureRemoteFilesystem(layout, jar, function(err) {
+          server.ensureRemoteFilesystem(layout, jar, function(err) {
             if(err) throw err;
 
             fs.writeFile('/hello', 'hello world', function (err) {
@@ -99,18 +100,18 @@ describe('Client bugs', function() {
                 expect(unsynced).to.be.true;
 
                 // Get a new token for this second connection
-                util.getWebsocketToken(result, function(err, result) {
+                server.getWebsocketToken(result, function(err, result) {
                   if(err) throw err;
 
                   jar = result.jar;
-                  sync.connect(util.socketURL, result.token);
+                  sync.connect(server.socketURL, result.token);
                 });
               });
             });
           });
         });
 
-        sync.connect(util.socketURL, result.token);
+        sync.connect(server.socketURL, result.token);
       });
     });
   });

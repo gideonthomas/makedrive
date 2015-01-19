@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../lib/util.js');
+var server = require('../lib/server-utils.js');
 var Filer = require('../../lib/filer.js');
 var conflict = require('../../lib/conflict.js');
 var fsUtils = require('../../lib/fs-utils.js');
@@ -42,18 +43,18 @@ describe('MakeDrive Client - conflicted copy integration', function(){
 
   // Create 2 sync clients, do downstream syncs, then dirty both filesystems
   beforeEach(function(done) {
-    util.run(function() {
+    server.run(function() {
       var username = util.username();
 
-      util.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {
+      server.setupSyncClient({username: username, layout: layout, manual: true}, function(err, client) {
         if(err) throw err;
 
         client1 = client;
 
-        util.ensureRemoteFilesystem(layout, client.jar, function(err) {
+        server.ensureRemoteFilesystem(layout, client.jar, function(err) {
           if(err) throw err;
 
-          util.setupSyncClient({username: username, manual: true}, function(err, client) {
+          server.setupSyncClient({username: username, manual: true}, function(err, client) {
             if(err) throw err;
 
             client2 = client;
@@ -129,7 +130,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
                   '/dir1/file2': 'contents of file2'
                 };
 
-                util.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
+                server.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
                   expect(err).not.to.exist;
                   done();
                 });
@@ -195,7 +196,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
                     '/dir1/file2': 'contents of file2'
                   };
 
-                  util.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
+                  server.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
                     expect(err).not.to.exist;
                     done();
                   });
@@ -258,7 +259,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
                     '/dir1/resolved': 'data+2'
                   };
 
-                  util.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
+                  server.ensureRemoteFilesystem(newLayout, client2.jar, function(err) {
                     expect(err).not.to.exist;
                     done();
                   });

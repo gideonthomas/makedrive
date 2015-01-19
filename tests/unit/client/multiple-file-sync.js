@@ -1,5 +1,6 @@
 var expect = require('chai').expect;
 var util = require('../../lib/util.js');
+var server = require('../../lib/server-utils.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 
@@ -7,7 +8,7 @@ describe('MakeDrive Client - sync multiple files', function(){
   var provider;
 
   beforeEach(function(done) {
-    util.run(function() {
+    server.run(function() {
       provider = new Filer.FileSystem.providers.Memory(util.username());
       done();
     });
@@ -22,7 +23,7 @@ describe('MakeDrive Client - sync multiple files', function(){
    * brings them back.
    */
   it('should sync multiple files', function(done) {
-    util.authenticatedConnection(function( err, result ) {
+    server.authenticatedConnection(function( err, result ) {
       expect(err).not.to.exist;
 
       var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
@@ -44,7 +45,7 @@ describe('MakeDrive Client - sync multiple files', function(){
 
       sync.once('synced', function onUpstreamCompleted() {
         // Make sure all 3 files made it to the server
-        util.ensureRemoteFilesystem(layout, result.jar, function() {
+        server.ensureRemoteFilesystem(layout, result.jar, function() {
           sync.disconnect();
         });
       });
@@ -68,15 +69,15 @@ describe('MakeDrive Client - sync multiple files', function(){
           });
 
           // Get a new token for this second connection
-          util.getWebsocketToken(result, function(err, result) {
+          server.getWebsocketToken(result, function(err, result) {
             expect(err).not.to.exist;
 
-            sync.connect(util.socketURL, result.token);
+            sync.connect(server.socketURL, result.token);
           });
         });
       });
 
-      sync.connect(util.socketURL, result.token);
+      sync.connect(server.socketURL, result.token);
     });
   });
 
