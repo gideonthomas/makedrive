@@ -39,13 +39,14 @@ describe('The Server', function(){
   describe('Socket protocol', function() {
     var socket, socket2;
 
-    afterEach(function() {
+    afterEach(function(done) {
       if(socket) {
         socket.close();
       }
       if(socket2) {
         socket2.close();
       }
+      util.close(done);
     });
 
     it('should close a socket if bad data is sent in place of websocket-auth token', function(done) {
@@ -156,6 +157,11 @@ describe('The Server', function(){
 
   describe('Downstream syncs', function(){
     var authResponse = SyncMessage.response.authz.stringify();
+
+    beforeEach(util.start);
+    afterEach(function(done) {
+      util.close(done);
+    });
 
     it('should send a "REQUEST" for "CHECKSUMS" to trigger a downstream when a client connects and the server has a non-empty filesystem', function(done) {
       var username = testUtils.username();
@@ -397,6 +403,11 @@ describe('The Server', function(){
 
   describe('Upstream syncs', function() {
     var file = {path: '/file', content: 'This is a file'};
+
+    beforeEach(util.start);
+    afterEach(function(done) {
+      util.close(done);
+    });
 
     it('should send a "RESPONSE" of "SYNC" if a sync is requested on a file without a lock', function(done) {
       var syncRequest = SyncMessage.request.sync;

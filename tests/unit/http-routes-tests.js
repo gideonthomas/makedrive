@@ -11,7 +11,14 @@ var ALLOW_DOMAINS = process.env.ALLOWED_CORS_DOMAINS;
 var unzip = require("../lib/unzip.js");
 
 describe('[HTTP route tests]', function() {
-
+  before(function() {
+    server.start();
+    console.log('Server started');
+  });
+  after(function(done) {
+    console.log('Server ending');
+    server.close(done);
+  });
   it('should allow CORS access to /api/sync route', function(done) {
     server.run(function() {
       request.get(server.serverURL + '/api/sync', { headers: {origin: ALLOW_DOMAINS }}, function(req, res) {
