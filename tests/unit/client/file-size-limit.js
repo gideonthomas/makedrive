@@ -8,6 +8,13 @@ var MAX_SIZE_BYTES = 2000000;
 describe('Syncing file larger than size limit', function(){
   var provider;
 
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   beforeEach(function() {
     var username = util.username();
     provider = new Filer.FileSystem.providers.Memory(username);

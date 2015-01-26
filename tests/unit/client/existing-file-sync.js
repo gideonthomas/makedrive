@@ -7,6 +7,13 @@ var Filer = require('../../../lib/filer.js');
 describe('Syncing when a file already exists on the client', function(){
   var provider1;
 
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   beforeEach(function() {
     var username = util.username();
     provider1 = new Filer.FileSystem.providers.Memory(username);

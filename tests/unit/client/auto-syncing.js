@@ -8,12 +8,20 @@ describe('MakeDrive Client - Automatic syncing', function(){
   var provider;
   var syncingEventFired;
 
-  beforeEach(function(done) {
-    server.run(function() {
-      provider = new Filer.FileSystem.providers.Memory(util.username());
-      syncingEventFired = false;
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(function(err) {
+      if(err) throw err;
+      console.log('\n\n\nShutting down');
       done();
     });
+  });
+
+  beforeEach(function() {
+    provider = new Filer.FileSystem.providers.Memory(util.username());
+    syncingEventFired = false;
   });
   afterEach(function() {
     provider = null;

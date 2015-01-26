@@ -3,7 +3,6 @@ if(process.env.NEW_RELIC_ENABLED) {
 }
 
 var EventEmitter = require('events').EventEmitter;
-var cluster = require('cluster');
 var log = require('./lib/logger.js');
 
 var WebServer = require('./web-server.js');
@@ -20,19 +19,6 @@ module.exports = new EventEmitter();
  * module's ready property.
  */
 var isReady = false;
-function ready() {
-  if(process.send) {
-    process.send({cmd: 'ready'});
-  }
-
-  // Signal (to recluster master if we're a child process,
-  // and any event listeners like tests, and console) that
-  // server is running
-  isReady = true;
-  module.exports.emit('ready');
-
-  log.info('Started Server Worker.');
-}
 
 function shutdown(err) {
   // Deal with multiple things dying at once
@@ -41,17 +27,9 @@ function shutdown(err) {
     return;
   }
 
+  isReady = false;
   shutdown.inProcess = true;
-
   log.fatal(err, 'Starting shutdown process');
-
-  function kill() {
-    if (cluster.worker) {
-      cluster.worker.disconnect();
-    }
-    log.fatal('Killing server process');
-    process.exit(1);
-  }
 
   try {
     log.info('Attempting to shut down Socket Server [1/3]...');
@@ -61,13 +39,12 @@ function shutdown(err) {
         log.info('Attempting to shut down Redis Clients [3/3]...');
         RedisClients.close(function() {
           log.info('Finished clean shutdown.');
-          kill();
+          module.exports.emit('shutdown');
         });
       });
     });
   } catch(err2) {
-    log.error(err2, 'Unable to complete clean shutdown process');
-    kill();
+    module.exports.emit('shutdown', err2);
   }
 }
 
@@ -89,28 +66,39 @@ RedisClients.on('error', shutdownAndLog('Redis Clients'));
 process.on('SIGINT', shutdownAndLog('SIGINT'));
 process.on('error', shutdownAndLog('process.error'));
 
-RedisClients.start(function(err) {
-  if(err) {
-    log.fatal(err, 'Redis Clients Startup Error');
-    return shutdown(err);
-  }
-
-  WebServer.start(function(err, server) {
+module.exports.start = function(callback) {
+  RedisClients.start(function(err) {
     if(err) {
-      log.fatal(err, 'Web Server Startup Error');
+      log.fatal(err, 'Redis Clients Startup Error');
       return shutdown(err);
     }
 
-    SocketServer.start(server, function(err) {
+    WebServer.start(function(err, server) {
       if(err) {
-        log.fatal(err, 'Socket Server Startup Error');
+        log.fatal(err, 'Web Server Startup Error');
         return shutdown(err);
       }
 
-      ready();
+      SocketServer.start(server, function(err) {
+        if(err) {
+          log.fatal(err, 'Socket Server Startup Error');
+          return shutdown(err);
+        }
+
+        isReady = true;
+        module.exports.emit('ready');
+
+        log.info('Started Server Worker.');
+        callback();
+      });
     });
   });
-});
+};
+
+module.exports.shutdown = function(callback) {
+  module.exports.once('shutdown', callback);
+  shutdown('Requested shutdown');
+};
 
 module.exports.app = WebServer.app;
 Object.defineProperty(module.exports, 'ready', {

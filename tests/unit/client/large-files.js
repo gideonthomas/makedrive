@@ -7,11 +7,15 @@ var Filer = require('../../../lib/filer.js');
 describe('MakeDrive Client - sync large files', function(){
   var provider;
 
-  beforeEach(function(done) {
-    server.run(function() {
-      provider = new Filer.FileSystem.providers.Memory(util.username());
-      done();
-    });
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
+  beforeEach(function() {
+    provider = new Filer.FileSystem.providers.Memory(util.username());
   });
   afterEach(function() {
     provider = null;

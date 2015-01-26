@@ -6,14 +6,18 @@ var Filer = require('../../../lib/filer.js');
 var WebSocketServer = require('ws').Server;
 
 describe('MakeDrive Client API', function(){
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   describe('Core API', function() {
     var provider;
 
-    beforeEach(function(done) {
-      server.run(function() {
-        provider = new Filer.FileSystem.providers.Memory(util.username());
-        done();
-      });
+    beforeEach(function() {
+      provider = new Filer.FileSystem.providers.Memory(util.username());
     });
     afterEach(function() {
       provider = null;
@@ -157,31 +161,12 @@ describe('MakeDrive Client API', function(){
    */
   describe('Protocol & Error tests', function() {
     var provider;
-    var socket;
-    var port = 1212;
-    var testServer;
 
-    beforeEach(function(done) {
-      server.run(function() {
-        provider = new Filer.FileSystem.providers.Memory(util.username());
-
-        testServer = new WebSocketServer({port: port});
-        testServer.once('error', function(err){
-          expect(err, "[Error creating socket server]").to.not.exist;
-        });
-        testServer.once('listening', function() {
-          done();
-        });
-      });
+    beforeEach(function() {
+      provider = new Filer.FileSystem.providers.Memory(util.username());
     });
     afterEach(function() {
       provider = null;
-
-      if (socket) {
-        socket.close();
-      }
-      testServer.close();
-      testServer = null;
     });
 
     it('should emit an error describing an incorrect SYNC_STATE in the sync.request step', function(done){

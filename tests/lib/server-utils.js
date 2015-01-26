@@ -20,7 +20,7 @@ env.set('MAX_SYNC_SIZE_BYTES', 2000000);
 env.set('BASIC_AUTH_USERS', 'testusername:testpassword');
 env.set('AUTHENTICATION_PROVIDER', 'passport-webmaker');
 
-var server = require('./test-server.js');
+var server = require('../../server/server.js');
 var app = server.app;
 
 var serverURL = 'http://127.0.0.1:' + env.get('PORT'),
@@ -28,12 +28,12 @@ var serverURL = 'http://127.0.0.1:' + env.get('PORT'),
 
 // Mock Webmaker auth
 app.post('/mocklogin/:username', function(req, res) {
-  console.log('\n\n\nMock\n\n', req.user);
   var username = req.params.username;
+  console.log('here');
   if(!username){
     // Expected username.
     res.send(500);
-  } else if( req.session && req.session.user && req.session.user.username === username) {
+  } else if(req.session && req.session.user && req.session.user.username === username) {
     // Already logged in.
     res.send(401);
   } else{
@@ -399,7 +399,7 @@ function setupSyncClient(options, callback) {
 
 module.exports = {
   start: server.start,
-  close: server.close,
+  shutdown: server.shutdown,
   app: app,
   serverURL: serverURL,
   socketURL: socketURL,

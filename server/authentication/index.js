@@ -3,7 +3,7 @@ var passport = require('passport');
 var Path = require('path');
 var passportProvider = env.get('AUTHENTICATION_PROVIDER');
 var log = require('../lib/logger.js');
-
+console.log(passportProvider);
 try {
   passportProvider = require(Path.join(__dirname, 'providers', passportProvider));
 } catch (e) {
