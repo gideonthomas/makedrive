@@ -135,6 +135,7 @@ function add(client) {
     remove(client);
   });
 
+  clients = clients || [];
   clients.push(client);
   initClient(client);
 }
@@ -147,11 +148,12 @@ function shutdown(callback) {
   var connected = clients.length;
 
   function maybeFinished() {
-    if(++closed >= connected) {
+    if(closed >= connected) {
       clients = null;
       log.info('[Shutdown] All client connections safely closed.');
-      callback();
+      return callback();
     }
+    closed++;
     log.info('[Shutdown] Closed client %s of %s.', closed, connected);
   }
 

@@ -85,5 +85,8 @@ module.exports.close = function(callback) {
     return callback();
   }
 
-  server.close(callback);
+  server.close(function() {
+    server = null;
+    callback.apply(null, arguments);
+  });
 };

@@ -6,6 +6,7 @@ var Filer = require('../../../lib/filer.js');
 
 describe('Syncing when a file already exists on the client', function(){
   var provider1;
+  var username;
 
   before(function(done) {
     server.start(done);
@@ -15,7 +16,7 @@ describe('Syncing when a file already exists on the client', function(){
   });
 
   beforeEach(function() {
-    var username = util.username();
+    username = util.username();
     provider1 = new Filer.FileSystem.providers.Memory(username);
   });
   afterEach(function() {
@@ -25,7 +26,6 @@ describe('Syncing when a file already exists on the client', function(){
   it('should be able to sync when the client already has a file and is performing an initial downstream sync', function(done) {
     var fs1 = MakeDrive.fs({provider: provider1, manual: true, forceCreate: true});
     var everError = false;
-    var username = util.username();
 
     // 1. Write some file on local filesystem.
     fs1.writeFile('/abc.txt', 'this is a simple file', function(err) {

@@ -29,7 +29,6 @@ var serverURL = 'http://127.0.0.1:' + env.get('PORT'),
 // Mock Webmaker auth
 app.post('/mocklogin/:username', function(req, res) {
   var username = req.params.username;
-  console.log('here');
   if(!username){
     // Expected username.
     res.send(500);

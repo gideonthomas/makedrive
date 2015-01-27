@@ -39,11 +39,13 @@ function shutdown(err) {
         log.info('Attempting to shut down Redis Clients [3/3]...');
         RedisClients.close(function() {
           log.info('Finished clean shutdown.');
+          shutdown.inProcess = false;
           module.exports.emit('shutdown');
         });
       });
     });
   } catch(err2) {
+    shutdown.inProcess = false;
     module.exports.emit('shutdown', err2);
   }
 }
@@ -100,7 +102,11 @@ module.exports.shutdown = function(callback) {
   shutdown('Requested shutdown');
 };
 
-module.exports.app = WebServer.app;
+Object.defineProperty(module.exports, 'app', {
+  get: function() {
+    return WebServer.app;
+  }
+});
 Object.defineProperty(module.exports, 'ready', {
   get: function() {
     return isReady;
