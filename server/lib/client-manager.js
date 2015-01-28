@@ -148,7 +148,7 @@ function shutdown(callback) {
   var connected = clients.length;
 
   function maybeFinished() {
-    if(closed >= connected) {
+    if(closed + 1 >= connected) {
       clients = null;
       log.info('[Shutdown] All client connections safely closed.');
       return callback();

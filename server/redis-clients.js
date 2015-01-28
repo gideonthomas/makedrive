@@ -34,7 +34,7 @@ module.exports = new EventEmitter();
 // TODO: what is a useful limit?  Is unlimited (i.e., 0) OK?
 module.exports.setMaxListeners(0);
 
-function onerror(err) {
+function onerror(err) {console.log('ERror:', err.stack);
   if(closing) {
     return;
   }
@@ -45,7 +45,7 @@ function onerror(err) {
 }
 
 // Redis server connection lost.
-function onend() {
+function onend() {console.log('Ending');
   if(closing) {
     return;
   }
@@ -108,7 +108,7 @@ function createClient(callback) {
   }
 }
 
-module.exports.start = function(callback) {
+module.exports.start = function(callback) {console.log('Starting redis');
   if(store && pub && sub) {
     // Already started
     log.warn('RedisClients.start() called while already connected.');

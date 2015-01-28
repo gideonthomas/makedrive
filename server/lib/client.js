@@ -158,10 +158,11 @@ Client.prototype.close = function(error) {
     // If we're passed error info, try to close with that first
     if(self.ws) {
       error = error || {};
+      self.ws.onclose = noop;
+
       if(error.code && error.message) {
         // Ignore onerror, oncall with this call
         self.ws.onerror = noop;
-        self.ws.onclose = noop;
         self.ws.close(error.code, error.message);
       }
 

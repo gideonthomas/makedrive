@@ -192,7 +192,7 @@ function createFS(options) {
     log.warn('Sync interrupted by server for ' + path);
   };
 
-  sync.onError = function(err) {
+  sync.onError = function(err) {console.log(err);
     sync.emit('error', err);
     log.error('Sync error', err);
   };
