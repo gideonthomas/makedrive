@@ -58,7 +58,8 @@ describe('MakeDrive Client - sync symlink', function() {
             if (err) throw err;
             sync.once('completed', function onWriteSymlink() {
               server.ensureRemoteFilesystem(finalLayout, result.jar, function() {
-                done();
+                sync.once('disconnected', done);
+                sync.disconnect();
               });
             });
 

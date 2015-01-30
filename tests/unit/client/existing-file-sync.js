@@ -46,7 +46,8 @@ describe('Syncing when a file already exists on the client', function(){
 
           sync.once('synced', function synced() {
             expect(everError).to.be.false;
-            done();
+            sync.once('disconnected', done);
+            sync.disconnect();
           });
 
           // 3. try and conect to the server

@@ -41,7 +41,8 @@ describe('Syncing file larger than size limit', function(){
 
       sync.once('error', function onClientError(error) {
         expect(error).to.eql(new Error('Sync interrupted for path /hello.txt'));
-        done();
+        sync.once('disconnected', done);
+        sync.disconnect();
       });
 
       sync.connect(server.socketURL, result.token);
@@ -68,7 +69,8 @@ describe('Syncing file larger than size limit', function(){
 
       sync.once('completed', function() {
         expect(everError).to.be.false;
-        done();
+        sync.once('disconnected', done);
+        sync.disconnect();
       });
 
       sync.once('error', function onClientError() {

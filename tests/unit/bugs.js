@@ -73,39 +73,51 @@ describe('Client bugs', function() {
                      };
         jar = result.jar;
 
-        sync.once('connected', function onConnected() {
+        sync.once('synced', function onConnected() {
           util.createFilesystemLayout(fs, layout, function(err) {
             if(err) throw err;
+
+            sync.once('synced', function onUpstreamCompleted() {
+              sync.disconnect();
+            });
 
             sync.request();
           });
         });
 
-        sync.once('synced', function onUpstreamCompleted() {
-          sync.disconnect();
-        });
-
         sync.once('disconnected', function onDisconnected() {
-          // Re-sync with server and make sure we get our empty dir back
-          sync.once('connected', function onSecondDownstreamSync() {
+          var syncsCompleted = [];
+
+          sync.on('completed', function reconnectedDownstream(path) {
+            syncsCompleted.push(path);
+
+            if(syncsCompleted.length !== 3)  {
+              return;
+            }
+
+            sync.removeListener('completed', reconnectedDownstream);
             layout['/hello'] = 'hello world';
 
             util.ensureFilesystem(fs, layout, function(err) {
               expect(err).not.to.exist;
-            });
-          });
 
-          sync.once('synced', function reconnectedUpstream() {
-            server.ensureRemoteFilesystem(layout, jar, function(err) {
-              expect(err).not.to.exist;
-              done();
+              sync.once('synced', function reconnectedUpstream() {
+                server.ensureRemoteFilesystem(layout, jar, function(err) {
+                  expect(err).not.to.exist;
+
+                  sync.once('disconnected', done);
+                  sync.disconnect();
+                });
+              });
+
+              sync.request();
             });
           });
 
           server.ensureRemoteFilesystem(layout, jar, function(err) {
             if(err) throw err;
 
-            fs.writeFile('/hello', 'hello world', function (err) {
+            fs.writeFile('/hello', 'hello world', function(err) {
               if(err) throw err;
 
               fsUtils.isPathUnsynced(fs, '/hello', function(err, unsynced) {
@@ -118,6 +130,7 @@ describe('Client bugs', function() {
                   if(err) throw err;
 
                   jar = result.jar;
+
                   sync.connect(server.socketURL, result.token);
                 });
               });

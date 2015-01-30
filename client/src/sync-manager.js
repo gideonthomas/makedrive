@@ -174,7 +174,6 @@ SyncManager.prototype.syncUpstream = function() {
 
     if(!pathsToSync || !pathsToSync.length) {
       log.warn('Nothing to sync');
-      sync.allCompleted();
       return;
     }
 
@@ -194,6 +193,22 @@ SyncManager.prototype.syncUpstream = function() {
       }
       manager.send(syncRequest.stringify());
     });
+  });
+};
+
+SyncManager.prototype.syncNext = function(syncedPath) {
+  var manager = this;
+  var fs = manager.fs;
+  var sync = manager.sync;
+
+  fs.dequeueSync(function(err, syncsLeft, dequeuedSync) {
+    if(err) {
+      log.error('Failed to dequeue sync for ' + syncedPath + ' in SyncManager.syncNext()');
+    }
+
+    sync.onCompleted(dequeuedSync || syncedPath);
+    manager.currentSync = false;
+    manager.syncUpstream();
   });
 };
 

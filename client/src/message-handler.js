@@ -288,15 +288,7 @@ function handleResponse(syncManager, data) {
           log.error('Failed to remove unsynced attribute for ' + syncedPath + ' in handlePatchAckResponse, complete()');
         }
 
-        fs.dequeueSync(function(err, syncsLeft, dequeuedSync) {
-          if(err) {
-            log.error('Failed to dequeue sync for ' + syncedPath + ' in handlePatchAckResponse, complete()');
-          }
-
-          sync.onCompleted(dequeuedSync || syncedPath);
-          syncManager.currentSync = false;
-          syncManager.syncUpstream();
-        });
+        syncManager.syncNext(syncedPath);
       });
     }
 
@@ -312,7 +304,7 @@ function handleResponse(syncManager, data) {
           });
         }
 
-        // Non-existent paths (usually due to renames or
+        // Non-existent paths usually due to renames or
         // deletes cannot be stamped with a checksum
         return complete();
       }
@@ -377,7 +369,13 @@ function handleResponse(syncManager, data) {
         return onError(syncManager, err);
       }
 
-      syncManager.needsUpstream = syncManager.needsUpstream ? syncManager.needsUpstream.concat(paths.needsUpstream) : paths.needsUpstream;
+      var needsUpstream = paths.needsUpstream;
+      syncManager.needsUpstream = syncManager.needsUpstream || [];
+      syncManager.needsUpstream.forEach(function(upstreamPath) {
+        if(needsUpstream.indexOf(upstreamPath) === -1) {
+          syncManager.needsUpstream.push(upstreamPath);
+        }
+      });
 
       fsUtils.getPathsToSync(rawFs, fs.root, function(err, pathsToSync) {
         if(err) {
@@ -390,9 +388,11 @@ function handleResponse(syncManager, data) {
 
         var indexInPathsToSync;
 
-        if(pathsToSync && pathsToSync.toSync) {
+        if(pathsToSync && pathsToSync.toSync && needsUpstream.indexOf(path) === -1) {
           indexInPathsToSync = findPathIndexinArray(pathsToSync.toSync, path);
-          pathsToSync.toSync.splice(indexInPathsToSync, 1);
+          if(indexInPathsToSync !== -1) {
+            pathsToSync.toSync.splice(indexInPathsToSync, 1);
+          }
         }
 
         fsUtils.setPathsToSync(rawFs, fs.root, pathsToSync, function(err) {
@@ -423,7 +423,7 @@ function handleResponse(syncManager, data) {
   }
 
   function handleVerificationResponse() {
-    var path = data.content.path;
+    var path = data.content && data.content.path;
     syncManager.downstreams.splice(syncManager.downstreams.indexOf(path), 1);
     sync.onCompleted(path, syncManager.needsUpstream);
   }

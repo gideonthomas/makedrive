@@ -192,7 +192,7 @@ function createFS(options) {
     log.warn('Sync interrupted by server for ' + path);
   };
 
-  sync.onError = function(err) {console.log(err);
+  sync.onError = function(err) {
     sync.emit('error', err);
     log.error('Sync error', err);
   };
@@ -302,10 +302,6 @@ function createFS(options) {
               return;
             }
 
-            manager.needsUpstream = manager.needsUpstream.filter(function(upstreamPath) {
-              return needsUpstream.indexOf(upstreamPath) === -1;
-            });
-
             fs.getPathsToSync(function(err, pathsToSync) {
               var syncsLeft;
 
@@ -317,8 +313,10 @@ function createFS(options) {
 
               syncsLeft = pathsToSync ? pathsToSync.concat(downstreamQueue) : downstreamQueue;
 
-              sync.emit('completed', path);
-              log.info('Sync completed for ' + path);
+              if(path) {
+                sync.emit('completed', path);
+                log.info('Sync completed for ' + path);
+              }
 
               if(!syncsLeft.length) {
                 sync.allCompleted();

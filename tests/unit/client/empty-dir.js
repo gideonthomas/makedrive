@@ -1,83 +1,83 @@
-// var expect = require('chai').expect;
-// var util = require('../../lib/util.js');
-// var server = require('../../lib/server-utils.js');
-// var MakeDrive = require('../../../client/src');
-// var Filer = require('../../../lib/filer.js');
+var expect = require('chai').expect;
+var util = require('../../lib/util.js');
+var server = require('../../lib/server-utils.js');
+var MakeDrive = require('../../../client/src');
+var Filer = require('../../../lib/filer.js');
 
-// describe('MakeDrive Client - sync empty dir', function(){
-//   var provider;
+describe('MakeDrive Client - sync empty dir', function(){
+  var provider;
 
-//   before(function(done) {
-//     server.start(done);
-//   });
-//   after(function(done) {
-//     server.shutdown(done);
-//   });
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
 
-//   beforeEach(function() {
-//     provider = new Filer.FileSystem.providers.Memory(util.username());
-//   });
-//   afterEach(function() {
-//     provider = null;
-//   });
+  beforeEach(function() {
+    provider = new Filer.FileSystem.providers.Memory(util.username());
+  });
+  afterEach(function() {
+    provider = null;
+  });
 
-//   /**
-//    * This test creates an empty dir, syncs, and checks that it exists
-//    * on the server. It then removes it, and makes sure a downstream sync
-//    * brings it back.
-//    */
-//   it('should sync an empty dir', function(done) {
-//     server.authenticatedConnection(function(err, result) {
-//       expect(err).not.to.exist;
+  /**
+   * This test creates an empty dir, syncs, and checks that it exists
+   * on the server. It then removes it, and makes sure a downstream sync
+   * brings it back.
+   */
+  it('should sync an empty dir', function(done) {
+    server.authenticatedConnection(function(err, result) {
+      expect(err).not.to.exist;
 
-//       var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-//       var sync = fs.sync;
+      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
+      var sync = fs.sync;
 
-//       var layout = {'/empty': null};
+      var layout = {'/empty': null};
 
-//       sync.once('connected', function onConnected() {
-//         util.createFilesystemLayout(fs, layout, function(err) {
-//           expect(err).not.to.exist;
+      sync.once('connected', function onConnected() {
+        util.createFilesystemLayout(fs, layout, function(err) {
+          expect(err).not.to.exist;
 
-//           sync.request();
-//         });
-//       });
+          sync.request();
+        });
+      });
 
-//       sync.once('completed', function onUpstreamCompleted() {
-//         server.ensureRemoteFilesystem(layout, result.jar, function() {
-//           sync.disconnect();
-//         });
-//       });
+      sync.once('completed', function onUpstreamCompleted() {
+        server.ensureRemoteFilesystem(layout, result.jar, function() {
+          sync.disconnect();
+        });
+      });
 
-//       sync.once('disconnected', function onDisconnected() {
-//         util.deleteFilesystemLayout(fs, null, function(err) {
-//           expect(err).not.to.exist;
+      sync.once('disconnected', function onDisconnected() {
+        util.deleteFilesystemLayout(fs, null, function(err) {
+          expect(err).not.to.exist;
 
-//           // Re-sync with server and make sure we get our empty dir back
-//           sync.once('synced', function onSecondDownstreamSync() {
+          // Re-sync with server and make sure we get our empty dir back
+          sync.once('synced', function onSecondDownstreamSync() {
 
-//             sync.once('disconnected', function onSecondDisconnected() {
-//               util.ensureFilesystem(fs, layout, function(err) {
-//                 expect(err).not.to.exist;
+            sync.once('disconnected', function onSecondDisconnected() {
+              util.ensureFilesystem(fs, layout, function(err) {
+                expect(err).not.to.exist;
 
-//                 done();
-//               });
-//             });
+                done();
+              });
+            });
 
-//             sync.disconnect();
-//           });
+            sync.disconnect();
+          });
 
-//           // Get a new token for this second connection
-//           server.getWebsocketToken(result, function(err, result) {
-//             expect(err).not.to.exist;
+          // Get a new token for this second connection
+          server.getWebsocketToken(result, function(err, result) {
+            expect(err).not.to.exist;
 
-//             sync.connect(server.socketURL, result.token);
-//           });
-//         });
-//       });
+            sync.connect(server.socketURL, result.token);
+          });
+        });
+      });
 
-//       sync.connect(server.socketURL, result.token);
-//     });
-//   });
+      sync.connect(server.socketURL, result.token);
+    });
+  });
 
-// });
+});

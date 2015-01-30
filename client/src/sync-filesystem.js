@@ -60,8 +60,13 @@ function SyncFileSystem(fs) {
       return callback();
     }
 
-    paths = paths.filter(function(path) {
-      return path.indexOf(root) === 0;
+    var syncPaths = [];
+
+    paths.forEach(function(pathObj) {
+      var syncObj = pathObj.path ? pathObj : {path: pathObj, type: syncModes.CREATE};
+      if(syncObj.path.indexOf(root) === 0) {
+        syncPaths.push(syncObj);
+      }
     });
 
     fsUtils.getPathsToSync(fs, root, function(err, pathsToSync) {
@@ -71,10 +76,14 @@ function SyncFileSystem(fs) {
 
       var toSync = pathsToSync.toSync;
 
-      // Ignore redundancies
-      paths.forEach(function(path) {
-        if(toSync.indexOf(path) === -1) {
-          pathsToSync.toSync.push(path);
+      syncPaths.forEach(function(syncObj) {
+        // Ignore redundancies
+        var exists = !(toSync.every(function(objToSync) {
+          return objToSync.path !== syncObj.path;
+        }));
+
+        if(!exists) {
+          pathsToSync.toSync.push(syncObj);
         }
       });
 

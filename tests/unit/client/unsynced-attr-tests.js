@@ -86,7 +86,8 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
             expect(err).to.not.exist;
             expect(synced).to.be.true;
 
-            done();
+            sync.once('disconnected', done);
+            sync.disconnect();
           });
         });
       });
@@ -136,7 +137,8 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
                 expect(err).not.to.exist;
                 expect(synced).to.be.true;
 
-                done();
+                sync.once('disconnected', done);
+                sync.disconnect();
               });
             });
           });

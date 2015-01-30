@@ -710,7 +710,7 @@ SyncProtocolHandler.prototype.handleFullDownstream = function() {
 
     // Nothing in the filesystem, so nothing to sync
     if(!syncs || !syncs.length) {
-      return;
+      return client.sendMessage(SyncMessage.response.verification);
     }
 
     client.outOfDate = syncs;

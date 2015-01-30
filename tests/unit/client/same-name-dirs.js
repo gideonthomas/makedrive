@@ -45,7 +45,8 @@ describe('Syncing dirs with entries of the same name', function(){
         sync1.once('synced', function onClient1Upstream1() {
           server.ensureRemoteFilesystem(file1, result1.jar, function(err) {
             expect(err).not.to.exist;
-            done();
+            sync1.once('disconnected', done);
+            sync1.disconnect();
           });
         });
       });
@@ -77,7 +78,8 @@ describe('Syncing dirs with entries of the same name', function(){
         sync1.once('synced', function onClient1Upstream1() {
           server.ensureRemoteFilesystem(file1, result1.jar, function(err) {
             expect(err).not.to.exist;
-            done();
+            sync1.once('disconnected', done);
+            sync1.disconnect();
           });
         });
       });
