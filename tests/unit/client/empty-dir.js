@@ -5,7 +5,8 @@ var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 
 describe('MakeDrive Client - sync empty dir', function(){
-  var provider;
+  var fs;
+  var sync;
 
   before(function(done) {
     server.start(done);
@@ -15,10 +16,17 @@ describe('MakeDrive Client - sync empty dir', function(){
   });
 
   beforeEach(function() {
-    provider = new Filer.FileSystem.providers.Memory(util.username());
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(util.username()), manual: true, forceCreate: true});
+    sync = fs.sync;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   /**
@@ -29,9 +37,6 @@ describe('MakeDrive Client - sync empty dir', function(){
   it('should sync an empty dir', function(done) {
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
-
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
 
       var layout = {'/empty': null};
 

@@ -231,6 +231,17 @@ function ensureFilesystem(fs, layout, callback) {
   });
 }
 
+function disconnect(sync, callback) {
+  sync.removeAllListeners();
+
+  if(sync.state === sync.SYNC_DISCONNECTED) {
+    return callback();
+  }
+
+  sync.once('disconnected', callback);
+  sync.disconnect();
+}
+
 module.exports = {
   username: uniqueUsername,
   comparePaths: comparePaths,
@@ -243,5 +254,6 @@ module.exports = {
   generateSourceList: generateSourceList,
   generateChecksums: generateChecksums,
   generateDiffs: generateDiffs,
-  generateValidationChecksums: generateValidationChecksums
+  generateValidationChecksums: generateValidationChecksums,
+  disconnectClient: disconnect
 };

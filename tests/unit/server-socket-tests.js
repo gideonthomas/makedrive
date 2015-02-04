@@ -43,17 +43,16 @@ describe('The Server', function(){
     util.shutdown(done);
   });
 
-  describe('Socket protocol', function() {
+  describe('[Socket protocol] -', function() {
     var socket, socket2;
 
-    afterEach(function(done) {
+    afterEach(function() {
       if(socket) {
         socket.close();
       }
       if(socket2) {
         socket2.close();
       }
-      util.close(done);
     });
 
     it('should close a socket if bad data is sent in place of websocket-auth token', function(done) {
@@ -162,7 +161,7 @@ describe('The Server', function(){
     });
   });
 
-  describe('Downstream syncs', function(){
+  describe('[Downstream syncs] -', function(){
     var authResponse = SyncMessage.response.authz.stringify();
 
     it('should send a "REQUEST" for "CHECKSUMS" to trigger a downstream when a client connects and the server has a non-empty filesystem', function(done) {
@@ -179,6 +178,7 @@ describe('The Server', function(){
             var expectedMessage = SyncMessage.request.checksums;
             expectedMessage.content = {path: file.path, type: syncModes.CREATE, sourceList: FAKE_DATA};
             validateSocketMessage(message, expectedMessage, ['sourceList']);
+            socket.close();
             done();
           };
 
@@ -204,6 +204,7 @@ describe('The Server', function(){
             var expectedMessage = SyncMessage.response.diffs;
             expectedMessage.content = {path: file.path, type: syncModes.CREATE, diffs: FAKE_DATA};
             validateSocketMessage(message, expectedMessage, ['diffs']);
+            socket.close();
             done();
           };
 
@@ -236,6 +237,7 @@ describe('The Server', function(){
             }
 
             validateSocketMessage(message, expectedMessage);
+            socket.close();
             done();
           };
 
@@ -271,6 +273,7 @@ describe('The Server', function(){
               var expectedMessage = SyncMessage.response.sync;
               expectedMessage.content = {path: file.path, type: syncModes.CREATE};
               validateSocketMessage(message, expectedMessage);
+              socket.close();
               done();
             }
           };
@@ -319,6 +322,7 @@ describe('The Server', function(){
             var expectedMessage = SyncMessage.response.sync;
             expectedMessage.content = {path: file.path, type: syncModes.CREATE};
             validateSocketMessage(message, expectedMessage);
+            socket.close();
             done();
           };
 
@@ -355,6 +359,8 @@ describe('The Server', function(){
               var expectedMessage = SyncMessage.error.downstreamLocked;
               expectedMessage.content = {path: file.path, type: syncModes.CREATE};
               validateSocketMessage(message, expectedMessage);
+              socket.close();
+              socket2.close();
               done();
             };
 
@@ -394,6 +400,7 @@ describe('The Server', function(){
             }
 
             validateSocketMessage(message, expectedMessage);
+            socket.close();
             done();
           };
 
@@ -403,7 +410,7 @@ describe('The Server', function(){
     });
   });
 
-  describe('Upstream syncs', function() {
+  describe('[Upstream syncs] -', function() {
     var file = {path: '/file', content: 'This is a file'};
 
     it('should send a "RESPONSE" of "SYNC" if a sync is requested on a file without a lock', function(done) {
@@ -418,6 +425,7 @@ describe('The Server', function(){
           expectedMessage.content = {path: file.path, type: syncModes.CREATE};
 
           validateSocketMessage(message, expectedMessage);
+          socket.close();
           done();
         };
 
@@ -444,6 +452,8 @@ describe('The Server', function(){
             expectedMessage.content = {error: 'Sync already in progress', path: file.path, type: syncModes.CREATE};
 
             validateSocketMessage(message, expectedMessage);
+            socket.close();
+            socket2.close();
             done();
           };
 
@@ -472,6 +482,7 @@ describe('The Server', function(){
           }
 
           validateSocketMessage(message, expectedMessage, ['checksums']);
+          socket.close();
           done();
         };
 
@@ -503,6 +514,7 @@ describe('The Server', function(){
           validateSocketMessage(message, expectedMessage);
           util.ensureRemoteFilesystem(layout, result.jar, function(err) {
             expect(err).not.to.exist;
+            socket.close();
             done();
           });
         };
@@ -529,6 +541,8 @@ describe('The Server', function(){
             expectedMessage.content = {path: file.path, type: syncModes.CREATE, sourceList: FAKE_DATA};
 
             validateSocketMessage(message, expectedMessage, ['sourceList']);
+            socket.close();
+            socket2.close();
             done();
           };
 

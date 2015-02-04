@@ -41,7 +41,8 @@
  * - 'error': an error occured while connecting/syncing. The error
  * object is passed as the first arg to the event.
  *
- * - 'connected': a connection was established with the sync server
+ * - 'connected': a connection was established with the sync server. This
+ * does not indicate that a sync has begun (use the 'syncing' event instead).
  *
  * - 'disconnected': the connection to the sync server was lost, either
  * due to the client or server.
@@ -50,7 +51,14 @@
  * or 'error' event should follow at some point, indicating whether
  * or not the sync was successful.
  *
- * - 'completed': a sync has completed and was successful.
+ * - 'idle': a sync was requested but no sync was performed. This usually
+ * is triggered when no changes were made to the filesystem and hence, no
+ * changes were needed to be synced to the server.
+ *
+ * - 'completed': a file/directory/symlink has been synced successfully.
+ *
+ * - 'synced': MakeDrive has been synced and all paths are up-to-date with
+ * the server.
  *
  *
  * The `sync` property also exposes a number of methods, including:
@@ -195,6 +203,11 @@ function createFS(options) {
   sync.onError = function(err) {
     sync.emit('error', err);
     log.error('Sync error', err);
+  };
+
+  sync.onIdle = function(reason) {
+    sync.emit('idle', reason);
+    log.info('No sync took place: ' + reason);
   };
 
   sync.onDisconnected = function() {

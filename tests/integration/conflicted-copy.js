@@ -41,6 +41,13 @@ describe('MakeDrive Client - conflicted copy integration', function(){
     return Filer.Path.join('/dir1', entries[0]);
   }
 
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   // Create 2 sync clients, do downstream syncs, then dirty both filesystems
   beforeEach(function(done) {
     server.run(function() {
@@ -73,18 +80,19 @@ describe('MakeDrive Client - conflicted copy integration', function(){
 
   // Cleanly shut down both clients
   afterEach(function(done) {
-    client1.sync.once('disconnected', function() {
+    util.disconnectClient(client1.sync, function(err) {
+      if(err) throw err;
+
       client1 = null;
 
-      client2.sync.once('disconnected', function() {
+      util.disconnectClient(client2.sync, function(err) {
+        if(err) throw err;
+
         client2 = null;
+
         done();
       });
-
-      client2.sync.disconnect();
     });
-
-    client1.sync.disconnect();
   });
 
   /**
@@ -297,7 +305,7 @@ describe('MakeDrive Client - conflicted copy integration', function(){
         client2.fs.writeFile(conflictedCopyFilename, layout2[conflictedCopyFilename], function(err) {
           if(err) throw err;
 
-          client2.sync.once('synced', function() {
+          client2.sync.once('idle', function() {
             util.ensureFilesystem(client2.fs, layout2, function(err) {
               expect(err).not.to.exist;
 

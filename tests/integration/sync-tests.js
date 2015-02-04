@@ -7,6 +7,13 @@ var Filer = require('../../lib/filer.js');
 describe('Two clients', function(){
   var provider1, provider2;
 
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   beforeEach(function(done) {
     server.run(function() {
       var username = util.username();
@@ -76,7 +83,11 @@ describe('Two clients', function(){
                   util.ensureFilesystem(fs2, finalLayout, function(err) {
                     expect(err).not.to.exist;
 
-                    done();
+                    util.disconnectClient(sync1, function(err) {
+                      if(err) throw err;
+
+                      util.disconnectClient(sync2, done);
+                    });
                   });
                 });
 

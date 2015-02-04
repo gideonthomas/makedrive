@@ -39,7 +39,8 @@ describe("Server bugs", function() {
 });
 
 describe('Client bugs', function() {
-  var provider;
+  var fs;
+  var sync;
 
   before(function(done) {
     server.start(done);
@@ -49,10 +50,17 @@ describe('Client bugs', function() {
   });
 
   beforeEach(function() {
-    provider = new Filer.FileSystem.providers.Memory(util.username());
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(util.username()), manual: true, forceCreate: true});
+    sync = fs.sync;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   describe('[Issue 372]', function(){
@@ -61,8 +69,6 @@ describe('Client bugs', function() {
      * and change the file's content then try to connect and sync again.
      */
     it('should upstream newer changes made when disconnected and not create a conflicted copy', function(done) {
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
       var jar;
 
       server.authenticatedConnection(function(err, result) {
@@ -105,8 +111,7 @@ describe('Client bugs', function() {
                 server.ensureRemoteFilesystem(layout, jar, function(err) {
                   expect(err).not.to.exist;
 
-                  sync.once('disconnected', done);
-                  sync.disconnect();
+                  done();
                 });
               });
 

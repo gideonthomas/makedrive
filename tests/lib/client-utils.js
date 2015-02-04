@@ -15,7 +15,9 @@ function run(callback) {
   }
 
   WebServer.start(function(err, server) {
-    if(err) throw err;
+    if(err) {
+      return callback(err);
+    }
 
     SocketServer = new WebSocketServer({server: server});
     callback(SocketServer);
@@ -48,11 +50,24 @@ function authenticateAndRun(sync, callback) {
   sync.connect(socketURL, TOKEN);
 }
 
+function close(callback) {
+  if(!SocketServer) {
+    return callback();
+  }
+
+  WebServer.close(function() {
+    SocketServer.close();
+    SocketServer = null;
+    callback.apply(null, arguments);
+  });
+}
+
 module.exports = {
   serverURL: serverURL,
   socketURL: socketURL,
   TOKEN: TOKEN,
   run: run,
   decodeSocketMessage: decodeSocketMessage,
-  authenticateAndRun: authenticateAndRun
+  authenticateAndRun: authenticateAndRun,
+  close: close
 };

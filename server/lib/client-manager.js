@@ -120,6 +120,10 @@ var clients = [];
  * or life-cycle.
  */
 function remove(client) {
+  if(!clients) {
+    return;
+  }
+
   var idx = clients.indexOf(client);
   if(idx > -1) {
     clients.splice(idx, 1);
@@ -145,26 +149,37 @@ function add(client) {
  */
 function shutdown(callback) {
   var closed = 0;
-  var connected = clients.length;
+  var connected = clients ? clients.length : 0;
 
   function maybeFinished() {
-    if(closed + 1 >= connected) {
+    if(++closed >= connected) {
       clients = null;
       log.info('[Shutdown] All client connections safely closed.');
       return callback();
     }
-    closed++;
+
     log.info('[Shutdown] Closed client %s of %s.', closed, connected);
   }
 
-  if(connected === 0) {
+  if(!connected) {
     return maybeFinished();
   }
 
-  clients.forEach(function(client) {
-    client.once('closed', maybeFinished);
-    client.close();
-  });
+  var client;
+
+  for(var i = 0; i < connected; i++) {
+    client = clients[i] || null;
+
+    if(!client) {
+      maybeFinished();
+    } else {
+      client.once('closed', maybeFinished);
+
+      if(client.state !== States.CLOSING && client.state !== States.CLOSED) {
+        client.close();
+      }
+    }
+  }
 }
 
 module.exports = {

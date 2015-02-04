@@ -6,7 +6,9 @@ var Filer = require('../../../lib/filer.js');
 var MAX_SIZE_BYTES = 2000000;
 
 describe('Syncing file larger than size limit', function(){
-  var provider;
+  var fs;
+  var sync;
+  var username;
 
   before(function(done) {
     server.start(done);
@@ -16,19 +18,24 @@ describe('Syncing file larger than size limit', function(){
   });
 
   beforeEach(function() {
-    var username = util.username();
-    provider = new Filer.FileSystem.providers.Memory(username);
+    username = util.username();
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(username), manual: true, forceCreate: true});
+    sync = fs.sync;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   it('should return an error if file exceeded the size limit', function(done) {
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
       var layout = {'/hello.txt': new Filer.Buffer(MAX_SIZE_BYTES+1) };
 
       sync.once('connected', function onClientConnected() {
@@ -41,8 +48,7 @@ describe('Syncing file larger than size limit', function(){
 
       sync.once('error', function onClientError(error) {
         expect(error).to.eql(new Error('Sync interrupted for path /hello.txt'));
-        sync.once('disconnected', done);
-        sync.disconnect();
+        done();
       });
 
       sync.connect(server.socketURL, result.token);
@@ -55,8 +61,6 @@ describe('Syncing file larger than size limit', function(){
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
       var layout = {'/hello.txt': new Filer.Buffer(MAX_SIZE_BYTES) };
 
       sync.once('connected', function onClientConnected() {
@@ -69,8 +73,7 @@ describe('Syncing file larger than size limit', function(){
 
       sync.once('completed', function() {
         expect(everError).to.be.false;
-        sync.once('disconnected', done);
-        sync.disconnect();
+        done();
       });
 
       sync.once('error', function onClientError() {

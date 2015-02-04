@@ -8,7 +8,8 @@ var FILE_CONTENT = 'This is a file';
 var async = require('async');
 
 describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
-  var provider;
+  var fs;
+  var sync;
 
   before(function(done) {
     server.start(done);
@@ -18,10 +19,17 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
   });
 
   beforeEach(function() {
-    provider = new Filer.FileSystem.providers.Memory(util.username());
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(util.username()), manual: true, forceCreate: true});
+    sync = fs.sync;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   // Check whether a list of paths have the unsynced attribute attached
@@ -55,9 +63,6 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
-
       var layout = { '/dir/myfile1.txt': FILE_CONTENT,
                      '/myfile2.txt': FILE_CONTENT,
                      '/dir/subdir/myfile3.txt': FILE_CONTENT
@@ -86,8 +91,7 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
             expect(err).to.not.exist;
             expect(synced).to.be.true;
 
-            sync.once('disconnected', done);
-            sync.disconnect();
+            done();
           });
         });
       });
@@ -99,9 +103,6 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
   it('should remove unsynced attributes for unsynced nodes only after an upstream sync', function (done) {
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
-
-      var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
-      var sync = fs.sync;
 
       var layout = { '/dir/myfile1.txt': FILE_CONTENT,
                      '/myfile2.txt': FILE_CONTENT,
@@ -137,8 +138,7 @@ describe('MakeDrive Client FileSystem Unsynced Attribute', function() {
                 expect(err).not.to.exist;
                 expect(synced).to.be.true;
 
-                sync.once('disconnected', done);
-                sync.disconnect();
+                done();
               });
             });
           });

@@ -76,6 +76,7 @@
     "passport-strategy": "^1.0.0",
     "recluster": "^0.3.7",
     "redis": "^0.12.1",
+    "server-destroy": "^1.0.0",
     "useragent": "^2.1.0",
     "webmaker-auth": "0.0.14",
     "ws": "^0.6.5"

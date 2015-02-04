@@ -42,27 +42,35 @@ function incorrectEvent() {
 
 describe('The Client', function() {
   var SocketServer;
-  var provider;
-  var MakeDriveOptions = {forceCreate: true, manual: true};
+
+  after(function(done) {
+    util.close(done);
+  });
 
   describe('Socket protocol', function() {
+    var fs;
+    var sync;
+
     beforeEach(function(done) {
       util.run(function(server) {
         SocketServer = server;
-        provider = new Filer.FileSystem.providers.Memory(testUtils.username());
-        MakeDriveOptions.provider = provider;
+        fs = MakeDrive.fs({forceCreate: true, manual: true, provider: new Filer.FileSystem.providers.Memory(testUtils.username())});
+        sync = fs.sync;
         done();
       });
     });
 
-    afterEach(function(){
-      provider = null;
+    afterEach(function(done){
+      testUtils.disconnectClient(sync, function(err) {
+        if(err) throw err;
+
+        sync = null;
+        fs = null;
+        done();
+      });
     });
 
     it('should emit a sync error if authentication fails', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
-
       SocketServer.once('connection', function(client) {
         client.once('message', function(message) {
           var message = SyncMessage.error.format;
@@ -82,9 +90,6 @@ describe('The Client', function() {
     });
 
     it('should send emit a connected event on successfully authenticating with the server', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
-
       SocketServer.once('connection', function(client) {
         client.once('message', function() {
           client.send(SyncMessage.response.authz.stringify());
@@ -100,23 +105,29 @@ describe('The Client', function() {
   });
 
   describe('Downstream syncs', function() {
+    var fs;
+    var sync;
+
     beforeEach(function(done) {
       util.run(function(server) {
         SocketServer = server;
-        provider = new Filer.FileSystem.providers.Memory(testUtils.username());
-        MakeDriveOptions.provider = provider;
+        fs = MakeDrive.fs({forceCreate: true, manual: true, provider: new Filer.FileSystem.providers.Memory(testUtils.username())});
+        sync = fs.sync;
         done();
       });
     });
 
-    afterEach(function(){
-      provider = null;
+    afterEach(function(done){
+      testUtils.disconnectClient(sync, function(err) {
+        if(err) throw err;
+
+        sync = null;
+        fs = null;
+        done();
+      });
     });
 
     it('should send a "RESPONSE" of "AUTHORIZED" which triggers an initial downstream sync', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
-
       util.authenticateAndRun(sync, function(client, message) {
         validateSocketMessage(message, SyncMessage.response.authz);
         done();
@@ -124,8 +135,6 @@ describe('The Client', function() {
     });
 
     it('should send a "REQUEST" for "DIFFS" containing checksums when requested for checksums for a path under the sync root', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var checksumRequest = SyncMessage.request.checksums;
       checksumRequest.content = {path: file.path, type: syncModes.CREATE, sourceList: testUtils.generateSourceList([file])};
@@ -143,8 +152,6 @@ describe('The Client', function() {
     });
 
     it('should send a "RESPONSE" of "ROOT" when requested for checksums for a path not under the sync root', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var checksumRequest = SyncMessage.request.checksums;
       checksumRequest.content = {path: file.path, type: syncModes.CREATE, sourceList: testUtils.generateSourceList([file])};
@@ -170,8 +177,6 @@ describe('The Client', function() {
     });
 
     it('should patch the file being synced and send a "RESPONSE" of "PATCH" if the file was not changed during the sync', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var diffResponse = SyncMessage.response.diffs;
       diffResponse.content = {path: file.path, type: syncModes.CREATE, diffs: diffHelper.serialize(testUtils.generateDiffs([file]))};
@@ -194,8 +199,6 @@ describe('The Client', function() {
     });
 
     it('should not patch the file being synced and send a "REQUEST" for "DIFFS" with checksums if the file was changed during the sync', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var checksumRequest = SyncMessage.request.checksums;
       checksumRequest.content = {path: file.path, type: syncModes.CREATE, sourceList: testUtils.generateSourceList([file])};
@@ -228,8 +231,6 @@ describe('The Client', function() {
     });
 
     it('should emit a completed event on completing a downstream sync', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var verificationResponse = SyncMessage.response.verification;
       verificationResponse.content = {path: file.path};
@@ -246,37 +247,29 @@ describe('The Client', function() {
   });
 
   describe('Upstream syncs', function() {
+    var fs;
+    var sync;
+
     beforeEach(function(done) {
       util.run(function(server) {
         SocketServer = server;
-        provider = new Filer.FileSystem.providers.Memory(testUtils.username());
-        MakeDriveOptions.provider = provider;
+        fs = MakeDrive.fs({forceCreate: true, manual: true, provider: new Filer.FileSystem.providers.Memory(testUtils.username())});
+        sync = fs.sync;
         done();
       });
     });
 
-    afterEach(function(){
-      provider = null;
-    });
+    afterEach(function(done){
+      testUtils.disconnectClient(sync, function(err) {
+        if(err) throw err;
 
-    it('should emit a synced event if a sync is requested when no changes have been made', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
-
-      sync.once('synced', function() {
+        sync = null;
+        fs = null;
         done();
-      });
-      sync.once('error', incorrectEvent);
-      sync.once('completed', incorrectEvent);
-
-      util.authenticateAndRun(sync, function() {
-        sync.request();
       });
     });
 
     it('should send a "REQUEST" for "SYNC" if a sync is requested and there are changes to the filesystem', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
 
       util.authenticateAndRun(sync, function(client) {
@@ -297,14 +290,21 @@ describe('The Client', function() {
     });
 
     it('should emit an interrupted and syncing event when an upstream sync is requested for a file that has not been downstreamed', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var downstreamError = SyncMessage.error.needsDownstream;
       downstreamError.content = {path: file.path, type: syncModes.CREATE};
       var checksumRequest = SyncMessage.request.checksums;
       checksumRequest.content = {path: file.path, type: syncModes.CREATE, sourceList: testUtils.generateSourceList([file])};
       var errorEventEmitted = false;
+      var assertionsCompleted = false;
+
+      function endTest() {
+        if(assertionsCompleted) {
+          done();
+        } else {
+          assertionsCompleted = true;
+        }
+      }
 
       util.authenticateAndRun(sync, function(client) {
         fs.writeFile(file.path, file.content, function(err) {
@@ -314,6 +314,8 @@ describe('The Client', function() {
             sync.once('error', function(err) {
               errorEventEmitted = true;
 
+              client.once('message', endTest);
+
               expect(err).to.exist;
               expect(err.message).to.equal('Sync interrupted for path ' + file.path);
               client.send(checksumRequest.stringify());
@@ -321,7 +323,7 @@ describe('The Client', function() {
             sync.once('syncing', function(message) {
               expect(message).to.equal('Sync started for ' + file.path);
               expect(errorEventEmitted).to.be.true;
-              done();
+              endTest();
             });
 
             client.send(downstreamError.stringify());
@@ -333,8 +335,6 @@ describe('The Client', function() {
     });
 
     it('should trigger a syncing event and send a "REQUEST" for "CHECKSUMS" when the request to sync has been approved', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var syncResponse = SyncMessage.response.sync;
       syncResponse.content = {path: file.path, type: syncModes.CREATE};
@@ -360,8 +360,6 @@ describe('The Client', function() {
     });
 
     it('should send a "RESPONSE" of "DIFFS" when requested for diffs', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var diffRequest = SyncMessage.request.diffs;
       diffRequest.content = {path: file.path, type: syncModes.CREATE, checksums: testUtils.generateChecksums([file])};
@@ -383,8 +381,6 @@ describe('The Client', function() {
     });
 
     it('should emit a completed and synced event when all upstream syncs are completed', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var patchResponse = SyncMessage.response.patch;
       patchResponse.content = {path: file.path, type: syncModes.CREATE};
@@ -410,8 +406,6 @@ describe('The Client', function() {
     });
 
     it('should automatically trigger the next upstream sync in the queue once an upstream sync finishes', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
       var file2 = {path: '/file2', content: 'This is another file'};
       var patchResponse = SyncMessage.response.patch;
@@ -438,8 +432,6 @@ describe('The Client', function() {
     });
 
     it('should emit an error event when a sync is requested while another upstream sync is occurring', function(done) {
-      var fs = MakeDrive.fs(MakeDriveOptions);
-      var sync = fs.sync;
       var file = {path: '/file', content: 'This is a file'};
 
       util.authenticateAndRun(sync, function(client) {

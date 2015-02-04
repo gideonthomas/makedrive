@@ -5,8 +5,9 @@ var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 
 describe('MakeDrive Client - Automatic syncing', function(){
-  var provider;
   var syncingEventFired;
+  var fs;
+  var sync;
 
   before(function(done) {
     server.start(done);
@@ -16,11 +17,18 @@ describe('MakeDrive Client - Automatic syncing', function(){
   });
 
   beforeEach(function() {
-    provider = new Filer.FileSystem.providers.Memory(util.username());
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(util.username()), forceCreate: true});
+    sync = fs.sync;
     syncingEventFired = false;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   /**
@@ -31,9 +39,6 @@ describe('MakeDrive Client - Automatic syncing', function(){
   it('should complete a sync process with the default time interval', function(done) {
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
-
-      var fs = MakeDrive.fs({provider: provider, forceCreate: true});
-      var sync = fs.sync;
 
       var layout = {
         '/file1': 'contents of file1'
@@ -92,14 +97,13 @@ describe('MakeDrive Client - Automatic syncing', function(){
     server.authenticatedConnection(function(err, result) {
       expect(err).not.to.exist;
 
-      var fs = MakeDrive.fs({provider: provider, interval: 10000, forceCreate: true});
-      var sync = fs.sync;
-
       var layout = {
         '/file1': 'contents of file1'
       };
 
       sync.once('connected', function onConnected() {
+        sync.auto(10000);
+
         util.createFilesystemLayout(fs, layout, function(err) {
           expect(err).not.to.exist;
         });

@@ -7,6 +7,13 @@ describe('MakeDrive Client - file delete integration', function(){
   var client2;
   var layout = {'/dir1/file1': 'data'};
 
+  before(function(done) {
+    server.start(done);
+  });
+  after(function(done) {
+    server.shutdown(done);
+  });
+
   // Create 2 sync clients, do downstream syncs
   beforeEach(function(done) {
     server.run(function() {
@@ -34,25 +41,26 @@ describe('MakeDrive Client - file delete integration', function(){
 
   // Cleanly shut down both clients
   afterEach(function(done) {
-    client1.sync.once('disconnected', function() {
+    util.disconnectClient(client1.sync, function(err) {
+      if(err) throw err;
+
       client1 = null;
 
-      client2.sync.once('disconnected', function() {
+      util.disconnectClient(client2.sync, function(err) {
+        if(err) throw err;
+
         client2 = null;
+
         done();
       });
-
-      client2.sync.disconnect();
     });
-
-    client1.sync.disconnect();
   });
 
-  *
+  /*
    * This test creates 2 simultaneous clients for the same user, and simulates
    * a situation where a file is deleted by one client. It then makes sure that
    * this deleted file is synced to the other client.
-
+  */
   it('should handle file deletes in downstream and upstream syncs', function(done) {
     var finalLayout = {'/dir1': null};
 

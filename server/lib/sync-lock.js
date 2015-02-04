@@ -185,15 +185,10 @@ function request(client, path, callback) {
       redis.removeListener('lock-response', client._handleLockResponseFn);
       client._handleLockResponseFn = null;
 
-      redis.hset(key, path, id, function(err, reply) {
+      redis.hset(key, path, id, function(err) {
         if(err) {
           log.error({err: err, client: client}, 'Error setting redis lock key.');
           return callback(err);
-        }
-
-        if(reply !== 'OK') {
-          log.error({err: err, client: client}, 'Error setting redis lock key, expected OK reply, got %s.', reply);
-          return callback(new Error('Unexepcted redis response: ' + reply));
         }
 
         var lock = new SyncLock(key, id, path);

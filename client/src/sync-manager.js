@@ -174,6 +174,7 @@ SyncManager.prototype.syncUpstream = function() {
 
     if(!pathsToSync || !pathsToSync.length) {
       log.warn('Nothing to sync');
+      sync.onIdle('No changes made to the filesystem');
       return;
     }
 

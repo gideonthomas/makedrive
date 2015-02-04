@@ -3,7 +3,6 @@ var util = require('../../lib/util.js');
 var server = require('../../lib/server-utils.js');
 var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
-var WebSocketServer = require('ws').Server;
 
 describe('MakeDrive Client API', function(){
   before(function(done) {
@@ -160,13 +159,21 @@ describe('MakeDrive Client API', function(){
    * sent to the client.
    */
   describe('Protocol & Error tests', function() {
-    var provider;
+    var fs;
+    var sync;
 
     beforeEach(function() {
-      provider = new Filer.FileSystem.providers.Memory(util.username());
+      fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(util.username()), manual: true, forceCreate: true});
+      sync = fs.sync;
     });
-    afterEach(function() {
-      provider = null;
+    afterEach(function(done) {
+      util.disconnectClient(sync, function(err) {
+        if(err) throw err;
+
+        sync = null;
+        fs = null;
+        done();
+      });
     });
 
     it('should emit an error describing an incorrect SYNC_STATE in the sync.request step', function(done){
@@ -175,11 +182,6 @@ describe('MakeDrive Client API', function(){
 
         var token = result.token;
         var layout = {'/file': 'data'};
-        var fs;
-        var sync;
-
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
 
         sync.once('connected', function onConnected() {
           sync.once('disconnected', function onDisconnected() {
@@ -211,11 +213,6 @@ describe('MakeDrive Client API', function(){
 
         var token = result.token;
         var layout = {'/file': 'data'};
-        var fs;
-        var sync;
-
-        fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true, autoReconnect: false});
-        sync = fs.sync;
 
         sync.once('connected', function onConnected() {
           sync.once('disconnected', function onDisconnected() {

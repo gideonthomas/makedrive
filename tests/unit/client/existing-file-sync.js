@@ -5,7 +5,8 @@ var MakeDrive = require('../../../client/src');
 var Filer = require('../../../lib/filer.js');
 
 describe('Syncing when a file already exists on the client', function(){
-  var provider;
+  var fs;
+  var sync;
   var username;
 
   before(function(done) {
@@ -17,14 +18,20 @@ describe('Syncing when a file already exists on the client', function(){
 
   beforeEach(function() {
     username = util.username();
-    provider = new Filer.FileSystem.providers.Memory(username);
+    fs = MakeDrive.fs({provider: new Filer.FileSystem.providers.Memory(username), manual: true, forceCreate: true});
+    sync = fs.sync;
   });
-  afterEach(function() {
-    provider = null;
+  afterEach(function(done) {
+    util.disconnectClient(sync, function(err) {
+      if(err) throw err;
+
+      sync = null;
+      fs = null;
+      done();
+    });
   });
 
   it('should be able to sync when the client already has a file and is performing an initial downstream sync', function(done) {
-    var fs = MakeDrive.fs({provider: provider, manual: true, forceCreate: true});
     var everError = false;
 
     // 1. Write some file on local filesystem.
@@ -37,17 +44,20 @@ describe('Syncing when a file already exists on the client', function(){
         // 2. try to connect after successfully changing the local filesystem
         server.authenticatedConnection({username: username}, function(err, result) {
           if(err) throw err;
-          var sync = fs.sync;
 
           // 4. should not have any error after trying to connect to the server.
           sync.once('error', function error(err) {
             everError = err;
           });
 
-          sync.once('synced', function synced() {
+          sync.once('completed', function completed(path) {
+            expect(path).to.equal('/file');
             expect(everError).to.be.false;
-            sync.once('disconnected', done);
-            sync.disconnect();
+            done();
+          });
+
+          sync.once('synced', function synced() {
+            expect(true, 'Makedrive should not be completely synced').to.be.false;
           });
 
           // 3. try and conect to the server
